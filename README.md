@@ -1,4 +1,4 @@
-Catchmentwide Erosion Rates with riversand 
+Catchmentwide erosion rates with riversand 
 ------------------------------------------
 
 `riversand` is a python package to calculate catchmentwide erosion rates from
