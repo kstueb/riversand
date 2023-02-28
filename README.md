@@ -2,7 +2,7 @@ Catchmentwide Erosion Rates with riversand
 ------------------------------------------
 
 `riversand` is a python package to calculate catchmentwide erosion rates from
-cosmogenic nuclide concentrations in river sand samples. The program calculates
+cosmogenic nuclide concentrations in river sand samples. The program computes
 the hypsometric statistics of the catchment area from a digital elevation model.
 It uses the online erosion rate calculator by Greg Balco
 (e.g. [http://stoneage.hzdr.de/](http://stoneage.hzdr.de/)) to determine predicted
@@ -13,16 +13,18 @@ polynomial fit to $N(\varepsilon)$.
 ![Rastergrafik](https://user-images.githubusercontent.com/73031498/221909077-601ccea1-880b-4738-89d8-2ff57a16c89b.png)
 
 
-The method works for in situ Be-10 and Al-26 data and is considered
+The method works for in situ Be-10 and Al-26 data. It is fast (few seconds for
+one catchment) for all production scaling methods implemented in the online
+calculator (St: Lal 1991/Stone 2000; Lm: Lal/Stone with a geomagnetic correction
+after Nishiizumi et al. 1989; LSDn: Lifton et al. 2014) and independent of the
+catchment size or the resolution of the digital elevation model. It is considered
 robust for catchments up to approx. 600 km x 600 km; for larger catchments
 the effect of latitude on cosmogenic production may become significant.
 
-Citation
---------
+The approach is described in:
 
-The software is described in:
-
-Stübner, K., Balco, G., and Schmeisser, N. (in review). Calculating catchmentwide erosion rates using an existing online calculator. *Radiocarbon*. 
+Stübner, K., Balco, G., and Schmeisser, N. (in review). Calculating catchmentwide
+erosion rates using an existing online calculator. *Radiocarbon*. 
 
 Installation and Usage
 ----------------------
