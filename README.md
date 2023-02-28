@@ -10,7 +10,7 @@ nuclide concentrations $N$ for given erosion rates $\varepsilon$, and calculates
 the erosion rate that corresponds to the measured nuclide concentration from a
 polynomial fit to $N(\varepsilon)$.
 
-![Rastergrafik](https://user-images.githubusercontent.com/73031498/221908503-81925a10-ae6f-4586-a16a-e2fa6844c267.png)
+![Rastergrafik](https://user-images.githubusercontent.com/73031498/221909077-601ccea1-880b-4738-89d8-2ff57a16c89b.png)
 
 
 The method works for in situ Be-10 and Al-26 data and is considered
