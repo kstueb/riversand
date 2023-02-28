@@ -30,7 +30,7 @@ Documentation
 -------------
 - [`quickstart.ipynb`](https://github.com/kstueb/riversand/blob/main/riversand/example_scripts/quickstart.ipynb)
 - [`step_by_step.ipynb`](https://github.com/kstueb/riversand/blob/main/riversand/example_scripts/step_by_step.ipynb)
-- [`test_data`](https://github.com/kstueb/riversand/blob/main/riversand/example_scripts/test_data)
+- [`test_data/`](https://github.com/kstueb/riversand/blob/main/riversand/example_scripts/test_data) : geotiffs of a 35m-resolution digital elevation model, a topographic shielding raster generated with [TopoToolbox](https://topotoolbox.wordpress.com/) and a binary raster indicating quartz-bearing and quartz-free lithologies; shapefiles with catchment outlines; a spreadsheet with sample data. 
 
 Installation
 ------------
