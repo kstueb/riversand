@@ -10,11 +10,8 @@ nuclide concentrations $N$ for given erosion rates $\varepsilon$, and calculates
 the erosion rate that corresponds to the measured nuclide concentration from a
 polynomial fit to $N(\varepsilon)$.
 
-This calculator processes geospatial data (digital elevation model, catchment
-outline and other) to extract hypsometry statistics of the catchment and
-determine a cosmogenic nuclide catchmentwide erosion rate. It uses the online
-erosion rate calculator by Greg Balco (e.g. http://stoneage.hzdr.de/) to
-calculate cosmogenic nuclide production.
+![Rastergrafik](https://user-images.githubusercontent.com/73031498/221908503-81925a10-ae6f-4586-a16a-e2fa6844c267.png)
+
 
 The method works for in situ Be-10 and Al-26 data and is considered
 robust for catchments up to approx. 600 km x 600 km; for larger catchments
