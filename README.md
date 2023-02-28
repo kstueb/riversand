@@ -15,8 +15,8 @@ polynomial fit to $N(\varepsilon)$.
 
 The method works for in situ Be-10 and Al-26 data. It is fast (few seconds for
 one catchment) for all production scaling methods implemented in the online
-calculator (St: Lal 1991/Stone 2000; Lm: Lal/Stone with a geomagnetic correction
-after Nishiizumi et al. 1989; LSDn: Lifton et al. 2014) and independent of the
+calculator (**St**: Lal 1991/Stone 2000; **Lm**: Lal/Stone with a geomagnetic correction
+after Nishiizumi et al. 1989; **LSDn**: Lifton et al. 2014) and independent of the
 catchment size or the resolution of the digital elevation model. It is considered
 robust for catchments up to approx. 600 km x 600 km; for larger catchments
 the effect of latitude on cosmogenic production may become significant.
