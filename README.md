@@ -26,19 +26,24 @@ The approach is described in:
 Stübner, K., Balco, G., and Schmeisser, N. (in review). Calculating catchmentwide
 erosion rates using an existing online calculator. *Radiocarbon*. 
 
-Installation and Usage
-----------------------
+Documentation
+-------------
 
-This `riversand` package has been developed in python 3.9. It needs the
-geospatial data processing packages `rasterio`, `fiona` and `pyproj` as 
-well as several other common python packages including `scipy`, `xarray`
-and `pandas`.
 
-The package is available at PyPI.org and can be installed with
+Installation
+------------
+Install riversand by running:
 ```
-> pip install riversand
+$ pip install riversand
 ```
-A `conda` distribution will be released in the future.
+Requirements
+------------
+- numpy, scipy, pandas
+- rasterio
+- fiona
+- pyproj
+- xarray
+
 
 To get started, copy the  folder [`example_scripts`](https://github.com/kstueb/riversand/tree/main/riversand/example_scripts)
 to your computer and go through the example jupyter notebooks
