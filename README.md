@@ -28,7 +28,9 @@ erosion rates using an existing online calculator. *Radiocarbon*.
 
 Documentation
 -------------
-
+- [`quickstart.ipynb`](https://github.com/kstueb/riversand/blob/main/riversand/example_scripts/quickstart.ipynb)
+- [`step_by_step.ipynb`](https://github.com/kstueb/riversand/blob/main/riversand/example_scripts/step_by_step.ipynb)
+- [`test_data`](https://github.com/kstueb/riversand/blob/main/riversand/example_scripts/test_data)
 
 Installation
 ------------
@@ -44,12 +46,6 @@ Requirements
 - pyproj
 - xarray
 
-
-To get started, copy the  folder [`example_scripts`](https://github.com/kstueb/riversand/tree/main/riversand/example_scripts)
-to your computer and go through the example jupyter notebooks
-[`quickstart.ipynb`](https://github.com/kstueb/riversand/blob/main/riversand/example_scripts/quickstart.ipynb) and
-[`step_by_step.ipynb`](https://github.com/kstueb/riversand/blob/main/riversand/example_scripts/step_by_step.ipynb)
-The subfolder `user_data` has some example datasets including geotiff's
-of the catchment DEM and topographic shielding factors calculated with
-[TopoToolbox](https://topotoolbox.wordpress.com),
-shapefiles with catchment outlines and a spreadsheet with sample data).
+License
+-------
+[GNU General Public License v3.0](https://www.gnu.org/licenses/gpl-3.0.en.html)
