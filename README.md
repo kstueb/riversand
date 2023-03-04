@@ -8,7 +8,7 @@ It uses the online erosion rate calculator by Greg Balco
 (e.g. [http://stoneage.hzdr.de/](http://stoneage.hzdr.de/)) to determine predicted
 nuclide concentrations $N$ for given erosion rates $E$, and calculates
 the erosion rate that corresponds to the measured nuclide concentration from a
-polynomial fit to $N(E)$.
+polynomial fit $N(E)$.
 
 ![Rastergrafik](https://user-images.githubusercontent.com/73031498/221909077-601ccea1-880b-4738-89d8-2ff57a16c89b.png)
 
