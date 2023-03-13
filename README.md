@@ -45,11 +45,9 @@ $ pip install riversand
 ```
 Requirements
 ------------
-- numpy, scipy, pandas
-- rasterio
-- fiona
-- pyproj
-- xarray
+- numpy, scipy, pandas, xarray
+- rasterio, fiona, pyproj
+- matplotlib
 
 License
 -------
