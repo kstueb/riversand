@@ -1,9 +1,26 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Tue Feb 21 16:15:52 2023
 
-***** xml.py ******************************************************************
+*******************************************************************************
+xml.py  :  decoding of the xml server output 
+
+    Copyright (C) 2023  Konstanze Stübner, kstueb@gmail.com
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+*******************************************************************************
 
 Conversion of xml-strings returned by the server to
 a pandas DataFrame, a diagnostics string and a version dictionary.
@@ -21,9 +38,6 @@ a pandas DataFrame, a diagnostics string and a version dictionary.
 read_erates(result_xml)
 read_NofE(result_xml)
 read_ages(result_xml) # not implemented
-
-
-@author: Konstanze Stübner, kstueb@gmail.com
 
 """
 

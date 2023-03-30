@@ -1,9 +1,26 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Fri Feb 17 16:26:55 2023
 
-***** calc.py *****************************************************************
+*******************************************************************************
+calc.py  :  url requests to stoneage.hzdr.de and calculation of erosion rate 
+
+    Copyright (C) 2023  Konstanze Stübner, kstueb@gmail.com
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+*******************************************************************************
 
 General functions:
 - get_textline() : Cast 'sample' and 'topo' data to textstring for the online
@@ -23,8 +40,6 @@ The work horse:
     Returns error=['minE too high'] or ['maxE too low']
     or a list of one or several other errors.
 
-@author: Konstanze Stübner, kstueb@gmail.com
-
 """
 
 import numpy as np
@@ -40,13 +55,12 @@ import urllib.request
 
 def get_textline(sample:pd.Series, topo:pd.Series, shielding) -> str:
     """
-    Cast sample and topo to textstring for the online calculator. Input data 
-    are validated by utils.validate_*(), i.e. are transformed to valid and
-    complete dictionaries; utils.validate_*() raises ValueErrors
+    Cast sample and topo data to textstring for the online calculator. Input
+    data are validated by utils.validate_*().
 
     sample : pandas Series or dict
         > sample_data = S.data.iloc[n]
-        Missing data are filled with default values, faulty data raise ValueError.
+        Missing data are replaced by default values, faulty data raise ValueError.
     topo : pandas Series or dict 
         'lat', 'long', 'elevation' (and 'shielding' if shielding='topo').
         > topo_data = topotable.iloc[n]
@@ -57,6 +71,17 @@ def get_textline(sample:pd.Series, topo:pd.Series, shielding) -> str:
         'sample', 'topo' or a numeric shielding factor. Defines whether
         shielding is taken from sample or raster data.
     
+    Returns
+    -------
+    textline : str
+        String corresponding to one location and one set of sample data (Be-10
+        or Al-26).
+        
+    Raises
+    ------
+    TypeError : input data format is invalid
+    ValueError : data cannot be validated
+        
     """
     
     sample = deepcopy(sample)
@@ -86,7 +111,7 @@ def get_textline(sample:pd.Series, topo:pd.Series, shielding) -> str:
             topo = topo.to_dict()
         
         if not isinstance(topo, dict):
-            raise TypeError("get_textline() argmment 'topo' must be dict or pandas Series")
+            raise TypeError("get_textline() argument 'topo' must be dict or pandas Series")
 
    
     # 'standardization' is set to 07KNSTD (Be-10) or KNSTD (Al-26)        
@@ -103,8 +128,8 @@ def get_textline(sample:pd.Series, topo:pd.Series, shielding) -> str:
             sf = np.nan
         finally:
             if np.isnan(sf):
-                raise ValueError("Invalid shielding 'sample' (no shielding "+
-                                 "defined in 'sample')")
+                raise ValueError("Invalid shielding='sample': no shielding "+
+                                 "defined in sample data")
     if shielding=='topo':
         try:
             sf = float(topo['shielding'])
@@ -112,8 +137,8 @@ def get_textline(sample:pd.Series, topo:pd.Series, shielding) -> str:
             sf = np.nan
         finally:
             if np.isnan(sf):
-                raise ValueError("Invalid shielding 'topo' (no shielding "+
-                                 "defined in 'topo')")
+                raise ValueError("Invalid shielding='topo': no shielding "+
+                                 "defined in topo data")
             
     if isinstance(shielding, Number):
         sample['shielding'] = shielding
@@ -135,7 +160,7 @@ def get_textline(sample:pd.Series, topo:pd.Series, shielding) -> str:
         except ValueError as e:
             raise e
     else:
-        raise ValueError("Invalid shielding (must be 'topo', 'sample' or numeric)")
+        raise ValueError("Invalid shielding: must be 'topo', 'sample' or numeric")
     
     out = {**out1, **out2, **out3}
     textline = "{} {:.5f} {:.5f} {:.3f} {} {} {} {:.5f} {:.5f} {} ; {} {} {} {} {} {} ;".format(
@@ -752,15 +777,7 @@ def get_version(url:str=None) -> dict:
     return version
 
 def main():
-    """ Testing calc.py """
-    import sys, os
-    
-    #rootdir = "/home/user/Dokumente/11_catchment_erates_calculator/2022 CatchCalc_v0/riversand-1.0"
-    #sys.path.append(rootdir)
-    #path = os.path.join(rootdir, "tests/test_data")
-    
-    import riversand
-
+    pass
 
 if __name__ == "__main__":
     main()

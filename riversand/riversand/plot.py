@@ -1,16 +1,30 @@
 """
-Created on Sun Feb 19 14:17:07 2023
 
-***** plot.py ***********************************************************
+*******************************************************************************
+plot.py  :  plotting functions
+
+    Copyright (C) 2023  Konstanze Stübner, kstueb@gmail.com
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+*******************************************************************************
 
 Plotting functions for the Riversand project
 
 plot_raster(R) - plot rasterio (Raster or Riversand object)
 plot_clipped_raster(clips) - plot clipped catchment (dict of xr.DataArray)
 plot_polyfit(E, delE, NofE, sample_data)
-
-
-@author: Konstanze Stübner, kstueb@gmail.com
 
 """
 
@@ -30,16 +44,18 @@ def plot_raster(R, dtype='elevation', fname='show'):
     Parameters
     ----------
     R : Riversand object (R=rv) or Raster object (R=rv.elevation, rv.shielding,...)
+    
     dtype : str, optional
-        If R=rv, specify which raster to plot, e.g., 'elevation', 'shielding',
+        If R=rv, specifies, which raster to plot, e.g., 'elevation', 'shielding',
         'quartz'. The default is 'elevation'.
+    
     fname : str, optional
         'show' : show the figure inline, do not save.
         'auto' : save figure as .jpg with auto-generated file name.
         'jpg'  : same as 'auto'.
         'png'  : same as 'auto' but save as .png.
         Custom filename including extension, e.g. 'my_image.tif'
-        The default is 'auto'.
+        The default is 'show'.
 
     Returns
     -------
@@ -51,46 +67,68 @@ def plot_raster(R, dtype='elevation', fname='show'):
 
     fig, ax = plt.subplots()
     
+    if dtype not in ('elevation', 'shielding', 'quartz'):
+        plt.close()
+        raise ValueError("Invalid dtype='{}'".format(dtype))
+        
     if isinstance(R, Raster):
-        label = R.dtype
+        dtype = R.dtype
         with rasterio.open(R.fname, 'r') as src:
             ax = show(src.read(), transform=src.transform, cmap='gray', ax=ax)
     
     elif isinstance(R, Riversand):
-        label = dtype
         if dtype=='elevation':
+            if R.elevation is None:
+                raise ValueError("No elevation raster available")                
             with rasterio.open(R.elevation.fname, 'r') as src:
-                ax = show(src.read(), transform=src.transform, cmap='gray', ax=ax)
+                ar = src.read()
+                try:
+                    vmin = np.nanmin(ar[ar!=src.nodata])
+                except:
+                    vmin = np.nanmin(ar)
+                ax = show(ar, transform=src.transform, cmap='gray',
+                          vmin=vmin, vmax=np.nanmax(ar),
+                          ax=ax)
         if dtype=='shielding':
+            if R.shielding is None:
+                plt.close()
+                raise ValueError("No shielding raster available")            
             with rasterio.open(R.shielding.fname, 'r') as src:
-                ax = show(src.read(), transform=src.transform, cmap='gray', ax=ax)
+                ar = src.read()
+                ax = show(ar, transform=src.transform, cmap='gray',
+                          vmin=np.nanmin(ar), vmax=1,
+                          ax=ax)
         if dtype=='quartz':
+            if R.quartz is None:
+                plt.close()
+                raise ValueError("No quartz raster available")
             with rasterio.open(R.quartz.fname, 'r') as src:
                 ax = show(src.read(), transform=src.transform, cmap='gray', alpha=0.5, ax=ax)
     else:
         plt.close()
         return
     
-   
     plt.xticks(fontsize=10), ax.set_xlabel('x', fontsize=12)
     plt.yticks(fontsize=10), ax.set_ylabel('y', fontsize=12)
-    
     
     if fname=='show':
         plt.show()
         return
+    if fname=='auto':
+        fname='jpg'
     
-    fullname = "_{}{}".format(label[0].upper(), label[1:].lower())
+    fullname = "_{}{}".format(dtype[0].upper(), dtype[1:].lower())
     if fname in {'jpg', 'png'}:
         fullname = "{}.{}".format(fullname, fname)
     else:     
-        fullname = "{}.jpg".format(fullname)
+        fullname = fname
             
-    plt.savefig(os.path.join(params.out_path, fullname), bbox_inches='tight', transparent=True)
+    plt.savefig(os.path.join(params.out_path, fullname),
+                bbox_inches='tight', transparent=True)
     plt.close()
     
     
-def plot_clipped_raster(clips, c_name='', label='elevation', fname='auto'):
+def plot_clipped_raster(clips, c_name='', dtype='elevation', fname='auto'):
     """
     Plot the clipped catchment.
 
@@ -101,8 +139,8 @@ def plot_clipped_raster(clips, c_name='', label='elevation', fname='auto'):
     c_name : str, optional
         catchment name for saving the figure. The default is ''.
    
-    label : str, optional
-        selects, which raster to plot ('elevation', 'shielding', 'quartz').
+    dtype : str, optional
+        specifies, which raster to plot ('elevation', 'shielding', 'quartz').
         The default is 'elevation'.
    
     fname : str, optional
@@ -120,34 +158,43 @@ def plot_clipped_raster(clips, c_name='', label='elevation', fname='auto'):
     """
     from riversand import params
     
-    if label not in clips.keys():
-        raise ValueError("No '{}' raster in clips".format(label))
+    if dtype not in clips.keys():
+        raise ValueError("No '{}' raster in clips".format(dtype))
         
-    X = clips[label]
+    X = clips[dtype]
     fig, ax = plt.subplots()
-    X.squeeze().plot.imshow(ax=ax, cmap='gray', cbar_kwargs={'label' : label})
+    if dtype=='elevation':
+        X.squeeze().plot.imshow(ax=ax, cmap='gray', cbar_kwargs={'label' : dtype})
+    if dtype=='shielding':
+        X.squeeze().plot.imshow(ax=ax, cmap='gray', vmax=1, cbar_kwargs={'label' : dtype})
+    if dtype=='quartz':
+        X.squeeze().plot.imshow(ax=ax, cmap='gray', alpha=0.5, cbar_kwargs={'label' : dtype})
+        
     #outline.plot(edgecolor='red', facecolor='none', ax=ax[i])
     #outline.centroid.plot(ax=ax[i], color='red')
     plt.xticks(fontsize=10), ax.set_xlabel('x', fontsize=12)
     plt.yticks(fontsize=10), ax.set_ylabel('y', fontsize=12)
     ax.set_aspect('equal')
-    ax.set_title(label)
+    ax.set_title(dtype)
     
     if fname=='show':
         plt.show()
         return
-    
+    if fname=='auto':
+        fname='jpg'
+        
     if c_name=='':
-        fullname = label
+        fullname = dtype
     else:
-        fullname = "{}_{}".format(c_name, label)
+        fullname = "{}_{}".format(c_name, dtype)
         
     if fname in {'jpg', 'png'}:
         fullname = "{}.{}".format(fullname, fname)
     else:     
-        fullname = "{}.jpg".format(fullname)
+        fullname = fname
             
-    plt.savefig(os.path.join(params.out_path, fullname), bbox_inches='tight', transparent=True)
+    plt.savefig(os.path.join(params.out_path, fullname),
+                bbox_inches='tight', transparent=True)
     plt.close()
     
 
@@ -201,8 +248,6 @@ def plot_polyfit(E, delE, NofE, sample_data,
         catchment name 'c_name':str
         scaling method 'scaling':str
             auto filename: "{}_{}.jpg".format(c_name, scaling)
-        full file name 'fullname':str
-            e.g., "DB05_LSDn.jpg"
         
     Returns
     -------
@@ -273,13 +318,17 @@ def plot_polyfit(E, delE, NofE, sample_data,
     if fname=='show':
         plt.show()
         return
+    if fname=='auto':
+        fname='jpg'
 
-    if 'fullname' in kwargs.keys():
-        fname = kwargs['fullname']
-    elif fname in {'jpg', 'png'}:
-        fname = "{}_{}.{}".format(c_name, scaling, fname)
+    #if 'fullname' in kwargs.keys():
+    #    fname = kwargs['fullname']
+    if fname in {'jpg', 'png'}:
+        fullname = "{}_{}.{}".format(c_name, scaling, fname)
     else:     
-        fname = "{}_{}.jpg".format(c_name, scaling)
-    plt.savefig(os.path.join(os.path.join(params.out_path, fname)), bbox_inches='tight', transparent=True)
+        fullname = fname
+        
+    plt.savefig(os.path.join(params.out_path, fullname),
+                bbox_inches='tight', transparent=True)
     plt.close()
     

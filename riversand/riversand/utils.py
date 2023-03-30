@@ -1,9 +1,26 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Sun Feb 19 18:22:11 2023
 
-***** utils.py ****************************************************************
+*******************************************************************************
+utils.py  :  utilities for the riversand package 
+
+    Copyright (C) 2023  Konstanze Stübner, kstueb@gmail.com
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+*******************************************************************************
 
 Validation functions for online calculator:
     validate_topo()
@@ -23,8 +40,6 @@ Geospatial processing functions:
     get_bins()
     get_topostats()
     
-
-@author: Konstanze Stübner, kstueb@gmail.com
 
 """
 
@@ -489,10 +504,10 @@ def get_bins(Z:xr.DataArray, binsize:int=100) -> np.ndarray:
 
 
 def get_topostats(clips, bins, centroid='from_clipped',
-                       polygon=None,
-                       epsg=None,
-                       validate_transforms=True,
-                       ) -> (pd.DataFrame, dict):
+                  polygon=None,
+                  epsg=None,
+                  validate_transforms=True,
+                  ) -> (pd.DataFrame, dict):
     """
     Compute elevation statistics. 
     
@@ -510,11 +525,11 @@ def get_topostats(clips, bins, centroid='from_clipped',
     
     if isinstance(epsg, int):
         pass
-    elif 'epsg' in clips.keys():
+    elif 'epsg' in clips.keys(): # clips['epsg']=None for non-validated 
         epsg = clips['epsg']
-    else:
-        raise ValueError("get_topostats() epsg cannot be determined from "+
-                         "argument 'clips'; specify as keyword argument")
+    if epsg is None:
+        raise ValueError("epsg cannot be determined from 'clips'; "+
+                         "specify as keyword argument")
     
     if isinstance(centroid, str): # allow mistakes
         centroid = centroid.lower()
@@ -523,8 +538,8 @@ def get_topostats(clips, bins, centroid='from_clipped',
     elif (isinstance(centroid, tuple) and len(centroid)==2):
         pass
     else:
-        raise TypeError("get_topostats() argument 'centroid' must be string "+
-                        "'from_clipped' or tuple (long, lat)")
+        raise TypeError("centroid must be string 'from_clipped' "+
+                        "or tuple (long, lat)")
     
     # Z is xr.DataArray of elevation raster
     Z = clips['elevation']
@@ -603,7 +618,7 @@ def get_topostats(clips, bins, centroid='from_clipped',
         'areakm2' : sum(df['area'])
         }
     for k, v in clips.items():
-        if k!='elevation':
+        if k not in ('elevation', 'epsg'):
             summary[k] = np.nanmean(v)
     summary['epsg'] = epsg # avoids that epsg is storead as float
     

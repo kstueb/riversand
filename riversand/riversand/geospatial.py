@@ -1,9 +1,26 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Tue Oct 18 01:15:49 2022
 
-***** geospatial.py ***********************************************************
+*******************************************************************************
+geospatial.py  :  geospatial processing for the riversand package 
+
+    Copyright (C) 2023  Konstanze Stübner, kstueb@gmail.com
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+*******************************************************************************
 
 This module implements the 'Riversand' object as well as the 'Raster' and
 'Catchment' objects.
@@ -23,9 +40,6 @@ results = rv.process_multi_catchment()
 The current version of the online calculator is obtained from calc.py
 version = calc.get_version()
 
-
-@author: Konstanze Stübner, kstueb@gmail.com
-
 """
 
 import os, sys
@@ -44,6 +58,8 @@ import pyproj.exceptions
 
 import fiona
 
+import warnings
+warnings.filterwarnings("error") # convert warnings to raise exceptions
 
 # =============================================================================
 # Raster datasets
@@ -60,40 +76,12 @@ def get_geotiff(fname:str) -> rasterio.DatasetReader:
     try:
         src = rasterio.open(fname, 'r')
         src.close()
+    except rasterio.errors.NotGeoreferencedWarning as e:
+        raise pyproj.exceptions.CRSError(e.args[0]) # 'Dataset has no geotransform, gcps, or rpcs. The identity matrix will be returned.'
     except:# rasterio.RasterioIOError as error:
         pass
     
     return src
-    
-    
-def get_epsg(rio_crs:rasterio.crs.CRS) -> int:
-    """
-    Get epsg code of raster coordinate reference system.
-    > get_epsg(src.crs)
-    
-    """
-    
-    epsg = None
-    try: 
-        crs = CRS.from_user_input(rio_crs) 
-        #crs = CRS.from_epsg(crs.to_epsg()) # this trick adds the area_of_use to raster_crs
-        epsg = crs.to_epsg()
-    except pyproj.exceptions.CRSError as error:
-        print(error)
-
-    if epsg is None:
-        try:
-            wkt = rio_crs.wkt
-            crs = CRS.from_wkt(wkt)
-            #crs = CRS.from_epsg(crs.to_epsg()) # this trick adds the area_of_use to raster_crs
-            epsg = crs.to_epsg()
-        except AttributeError:
-            pass
-        except pyproj.exceptions.CRSError as error:
-            print(error)
-            
-    # crs may not be specified in src, eg if the raster is Matlab generated without the Mapping toolbox   
-    return epsg
 
 
 class Raster():
@@ -109,12 +97,25 @@ class Raster():
             raise TypeError("Invalid Raster fname (must be string)")
             
         src = get_geotiff(fname) # closed rasterio.DatasetReader
+        # raises except pyproj.exceptions.CRSError  
+                
         if src:
             self.dtype = dtype
             self.fname = fname
             self.src = src
-            self.epsg = get_epsg(src.crs) # epsg code, int
+            self.crs = CRS(src.crs)
+            self.epsg = self.crs.to_epsg() # may be None
             self.res = src.res # resolution, tuple
+            
+            if self.crs.is_projected==False:
+                raise pyproj.exceptions.CRSError(
+                    ["Geotiff: no projected coordinate reference system",
+                     self.crs])
+            if self.epsg is None:
+                raise pyproj.exceptions.CRSError(
+                    ["Geotiff: cannot convert crs to epsg",
+                     self.crs])
+                
         else:
             raise IOError("Cannot read geotiff {}".format(fname))
         
@@ -151,15 +152,9 @@ def get_shapefile(fname:str) -> fiona.Collection:
 
 
 class Catchment():
-    dtypes = ('single', 'multi', '') # valid Catchment types
     
-    def __init__(self, fname:str, dtype:str=''):
+    def __init__(self, fname:str):
         
-        dtype = dtype.lower()
-        if dtype not in self.dtypes:
-            raise TypeError("Invalid Catchment dtype '{}' (must be 'single' or 'multi')"
-                            .format(dtype))
-
         if not isinstance(fname, str):
             raise TypeError("Invalid Catchment fname (must be string)")
         
@@ -179,80 +174,67 @@ class Catchment():
                 if len(catchments)==0:
                     raise ValueError("Shapefile empty, must have at least 1 polygon")
                     
-                crs = None
-                try: # get crs from wkt
-                    crs = CRS.from_wkt(src.crs_wkt)
-                except: # get crs from 'init'
-                    crs = src.crs
-                    try:
-                        crs = CRS.from_epsg(crs['init'].split(":")[1])
-                    except:
-                        print("Cannot determine shapefile projection")
-                    
-            if dtype=='':
-                if len(catchments)==1:
-                    self.dtype = 'single'
-                else:
-                    self.dtype = 'multi'
-            else:
-                self.dtype = dtype
+                crs = CRS(src.crs)
+                
                 
             self.fname = fname
             self.src = src
             
             self.attrs = list(attrs)
             self.crs = crs
+            self.epsg = crs.to_epsg() # may be None
             self.catchments = catchments
             
-            
             self.cid = None
+            
+            if self.crs.is_projected==False:
+                raise pyproj.exceptions.CRSError(
+                    ["Shapefile: no projected coordinate reference system",
+                     self.crs])
+            if self.epsg is None:
+                raise pyproj.exceptions.CRSError(
+                    ["Shapefile: cannot convert crs to epsg",
+                     self.crs])
 
         else:
             raise IOError("Cannot read shapefile {}".format(fname))
-            
-        
-    def set_dtype(self, dtype:str):
-        if dtype not in self.dtypes:
-            raise TypeError("Invalid Catchment dtype '{}' (must be 'single' or 'multi')".format(dtype))
-        self.dtype = dtype
         
         
     def set_cid(self, cid:str='id'):
-        """ Set Catchment.cid; this parameter is fyi only. """
+        """ Set Catchment.cid (fyi only, Riversand.cid is relevant) """
         
         if cid is None:
             self.cid = None
         else:
             if self.attrs is None:
-                print("'{}' is not a valid catchment identifier;".format(cid))
-                print("   shapefile has no fields")
+                print("ValueError : Invalid cid='{}';\n".format(cid) +
+                      "   shapefile has no attribute fields")
                 self.cid = None
             if cid in self.attrs:
                 self.cid = cid
             else:
-                print("'{}' is not a valid catchment identifier;".format(cid))
-                print("   shapefile has fields: {}".format(", ".join(self.attrs)))
+                print("ValueError : Invalid cid='{}';\n".format(cid) +
+                      "   shapefile attribute fields are: {}".format(", ".join(self.attrs)))
                 self.cid = None
 
 
     def get_names(self, cid:str=None) -> list:
         """
         Get sorted list of all catchment names from attribute field 'cid'.
-        Duplicates are included, missing values as 'None'.
+        Duplicates are included, missing values are shown as 'None'.
         
         """
         
         if cid is None:
-            try:
-                cid = self.cid
-            except:
-                raise ValueError("No catchment identifier set; use function .set_cid()")
+            cid = self.cid
+        if cid is None:
+            print("ValueError : use .set_cid() to set catchment identifier")
+            return None
         
         if cid not in self.attrs:
-            raise ValueError("Invalid catchment identifier '{}';\n"
-                                 .format(cid) +
-                                 "   attribute fields are: {}"
-                                 .format(", ".join(self.attrs)))
+            print("ValueError : Invalid cid='{}';\n".format(cid) +
+                  "   shapefile attribute fields are: {}".format(", ".join(self.attrs)))
+            return None
          
         try:
             c_names = [str(c['properties'][cid]) for c in self.catchments]
@@ -269,11 +251,14 @@ class Catchment():
         
         """
         
-        c_names = self.get_names(cid)        
-        c_invalid = [itm for itm, cnt in collections.Counter(c_names).items() if cnt>1] # non-unique
-        c_invalid += ['None', '']
-        c_names = [c for c in c_names if c not in c_invalid]        
-        c_names.sort()
+        c_names = self.get_names(cid) # returns None for invalid cid
+        if c_names is None:
+            print("ValueError : use .set_cid() to set catchment identifier")
+        else:
+            c_invalid = [itm for itm, cnt in collections.Counter(c_names).items() if cnt>1] # non-unique
+            c_invalid += ['None', '']
+            c_names = [c for c in c_names if c not in c_invalid]        
+            c_names.sort()
         return c_names
         
 
@@ -282,7 +267,6 @@ class Catchment():
         return len(self.catchments)
         
     def __repr__(self):
-        
         s = []
         #s += ["dtype : {}".format(self.dtype)]
         s += ["fname : {}".format(self.fname)]
@@ -290,7 +274,7 @@ class Catchment():
         
         s += ["attrs : {}".format(self.attrs)]
         s += ["len   : {}".format(len(self.catchments))]
-        s += ["epsg  : {}".format(self.crs.to_epsg())]
+        s += ["epsg  : {}".format(self.epsg)]
         
         if self.cid:
             s += ["cid   : {}".format(self.cid)]
@@ -304,13 +288,34 @@ class Catchment():
  
 
 class Riversand():
+    """
+    A Riversand object contains all the data needed to calculate catchmentwide
+    erosion rates. Methods:
     
-    def __init__(self):
+    .add_rasters()  # add Raster objects (.elevation, .shielding, .quartz)
+    .add_catchments()  # add Catchment object (.catchments)
+    .add_samples()  # add sample data (.samples)
+ 
+    .validate()   # validate projection and resolution of the geospatial data
+        (.res, .crs, .epsg.)
+        
+    .process_single_catchment()  # calculate erosion rate for a single catchment
+    .process_multi_catchment()  # calculate erosion rates for a shapefile with
+        multiple catchments (use .set_cid() to set the shapefile attribute to
+        be used as catchment name)
+    
+    """
+    
+
+    
+    def __init__(self, path:str=None):
+        self.path_to_data = None
         self.elevation = None # Raster object
         self.shielding = None # Raster object
         self.quartz = None # Raster object
         
         self.res = None # project resolution
+        self.crs = None # project projection
         self.epsg = None # project projection
         self.cid = None # catchment identifier for multi-catchment datsets
         
@@ -318,43 +323,93 @@ class Riversand():
 
         self.samples = None # pd.DataFrame of sample data
         
-        self.valid_catchments = None # set by self.validate('catchment')
+        self.valid_catchments = None # set by self.validate()
         # not validated if within raster bounds or if sample data is valid
         # set to None by .add_catchments(), .set_cid(),
         #     .add_samples_from_file(), .add_samples_from_dict()
             
-    def add_raster(self, fname:str, path:str='', dtype:str='elevation'):
+        if path is not None:
+            try:
+                self.set_path_to_data(path)
+            except FileNotFoundError as e:
+                print(type(e).__name__, ":", e.args[0])
+        
+    def set_path_to_data(self, path:str=None):
+        """ Set path to input data. """        
+        if os.path.isdir(path):
+            self.path_to_data = path
+        else:
+            raise FileNotFoundError("{}: No such directory".format(path))
+        
+        
+    def add_raster(self, fname:str, dtype:str='elevation'):
         """ Add raster dataset to the project. """
         if isinstance(fname, Raster):
             raise NotImplementedError("add_raster() not yet implemented for Raster object")
             
-        fullname = os.path.join(path, fname)
-        
+        if self.path_to_data is not None:
+            fname = os.path.join(self.path_to_data, fname)
+            
         dtype = dtype.lower()
-        if dtype=='elevation':
-            self.elevation = Raster(fullname, dtype)
-        elif dtype=='shielding':
-            self.shielding = Raster(fullname, dtype)
-        elif dtype=='quartz':
-            self.quartz = Raster(fullname, dtype)
-        else:
-            Raster(fullname, dtype) # raises exceptions
+        try:
+            if dtype=='elevation':
+                self.elevation = Raster(fname, dtype)
+            elif dtype=='shielding':
+                self.shielding = Raster(fname, dtype)
+            elif dtype=='quartz':
+                self.quartz = Raster(fname, dtype)
+            else:
+                Raster(fname, dtype) # raises exceptions
+        except FileNotFoundError as e:
+                print("{} : {}: No such file"
+                      .format(type(e).__name__, e.args[0].split(':')[0]))
+        except pyproj.exceptions.CRSError as e:
+            if isinstance(e.args[0], list):
+                print(type(e).__name__, ":",
+                      "Geotiff coordinate reference system ", end='')
+                if e.args[0][1].is_projected==False:
+                    print("is not a projected reference system.")
+                if e.args[0][1].to_epsg() is None:
+                    print("cannot be converted no EPSG code.")
+                print("")
+                print(e.args[0][1].__repr__())
+            else:
+                # "Dataset has no geotransform..." Warning raised as Exception by get_geotiff()
+                print(type(e).__name__, ":", e.args[0])
         
+        self.crs = None
         self.epsg = None
         self.res = None
         
         
-    def add_catchments(self, fname:str, path:str='', dtype:str='single'):
+    def add_catchments(self, fname:str):
         """ Add catchment shapefile to the project. """
         
         if isinstance(fname, Catchment):
             raise NotImplementedError("add_catchments() not yet implemented for Catchment object")
             
-        fullname = os.path.join(path, fname)
-        dtype = dtype.lower()
-        self.catchments = Catchment(fullname, dtype)
-        self.cid = None
+        if self.path_to_data is not None:
+            fname = os.path.join(self.path_to_data, fname)
+            
+        try:
+            self.catchments = Catchment(fname)
+        except FileNotFoundError as e:
+                print("{} : {}: No such file"
+                      .format(type(e).__name__, e.args[0].split(':')[0]))
+        except pyproj.exceptions.CRSError as e:
+            print("Shapefile coordinate reference system ", end='')
+            if e.args[0][1].is_projected==False:
+                print("is not a projected reference system.")
+            if e.args[0][1].to_epsg() is None:
+                print("cannot be converted no EPSG code.")
+            print("")
+            print(e.args[0][1].__repr__())
+            
+        self.crs = None
+        self.epsg = None
+        self.res = None
         
+        self.cid = None
         self.valid_catchments = None # set by self.validate()
         
         
@@ -362,25 +417,27 @@ class Riversand():
         """ Set attribute 'cid'. """
         
         if self.catchments is None:
-            raise ValueError("No catchments defined")
-        if self.catchments.attrs is None:
-            print("'{}' is not a valid catchment identifier;".format(cid))
-            print("   shapefile has no fields")
-            self.cid = None
-            self.catchments.set_cid(None)
-        if cid in self.catchments.attrs:
-            self.cid = cid
-            self.catchments.set_cid(cid)
+            print("ValueError : No catchments defined")
         else:
-            print("'{}' is not a valid catchment identifier;".format(cid))
-            print("   shapefile has fields: {}".format(", ".join(self.catchments.attrs)))
-            self.cid = None
-            self.catchments.set_cid(None)
+            if self.catchments.attrs is None:
+                print("ValueError : Invalid cid='{}';\n".format(cid) +
+                      "   shapefile has no attribute fields")
+                self.cid = None
+                self.catchments.set_cid(None)
+            if cid in self.catchments.attrs:
+                self.cid = cid
+                self.catchments.set_cid(cid)
+            else:
+                print("ValueError : Invalid cid='{}';\n".format(cid) +
+                      "   shapefile attribute fields are: {}"
+                      .format(", ".join(self.catchments.attrs)))
+                self.cid = None
+                self.catchments.set_cid(None)
             
         self.valid_catchments = None # set by self.validate()
         
         
-    def add_samples(self, **kwargs):
+    def add_samples(self, samples, add:bool=False):
         """
         Add / replace self.samples with data from dict or file.
         Prints error messages.
@@ -389,52 +446,43 @@ class Riversand():
         self.samples if possible.
         """
         
-        if 'data' in kwargs.keys():
+        if isinstance(samples, dict):
             try:
-                self.add_samples_from_dict(**kwargs)
+                self.add_samples_from_dict(samples, add)
             except Exception as e:
                 print("Error adding sample data from dictionary:\n   "+str(e))
             
-        elif 'fname' in kwargs.keys():
+        elif isinstance(samples, str):
             try:
-                self.add_samples_from_file(**kwargs)
+                self.add_samples_from_file(samples)
+            except FileNotFoundError as e:
+                    print("{} : {}: No such file"
+                          .format(type(e).__name__, e.args[0].split(':')[0]))
             except Exception as e:
                 print("Error adding sample data from file:\n   "+str(e))
         else:
-            raise TypeError("add_samples() missing required keyword argument 'data' or 'fname'")
+            raise TypeError("add_samples() missing mandatory argument "+
+                            "(file name or dictionary)")
 
                 
-    def add_samples_from_file(self, **kwargs):
+    def add_samples_from_file(self, fname:str):
         """
         Write sample data to self.samples.
-        kwargs: fname, path
         
         Raises ValueErrors "\n".join(errors) found by:
-        errors = self.validate('sample', verbose=False)
+        errR, errS, errC = self.validate(verbose=False)
         
         """
         
         from riversand import params
-        
-        if 'fname' in kwargs.keys():
-            fname = kwargs['fname']
-        else:
-            raise TypeError("add_samples_from_file() missing required keyword argument 'fname'")
-            
-        if 'path' in kwargs.keys():
-            path = kwargs['path']
-        else:
-            path = ''
                     
-        if not isinstance(fname, str):
-            raise TypeError("add_samples_from_file() 'fname' must be string")
-        if not isinstance(path, str):
-            raise TypeError("add_samples_from_file() 'path' must be string")
+        if self.path_to_data is not None:
+            fname = os.path.join(self.path_to_data, fname)
             
         df = pd.DataFrame()
         
         try:
-            df = pd.read_csv(os.path.join(path, fname))
+            df = pd.read_csv(fname)
             
             # I believe this is only needed for csv files
             for c in df.columns:
@@ -444,7 +492,7 @@ class Riversand():
                     pass
         except:
             try:
-                xls = pd.ExcelFile(os.path.join(path, fname))
+                xls = pd.ExcelFile(fname)
             except ImportError as e:
                 raise e
             except IOError as e:
@@ -473,27 +521,21 @@ class Riversand():
         
         self.valid_catchments = None # set by self.validate()
         
-        errors = self.validate('sample', verbose=False)
-        if errors:
-            raise ValueError("\n".join(errors))
+        _, errS, _ = self.validate(verbose=False)
+        if errS:
+            raise ValueError(errS[0])
         
-        return errors
+        return errS # list of one error message (sample data)
         
 
-    def add_samples_from_dict(self, **kwargs):
+    def add_samples_from_dict(self, data:dict, add:bool=False):
         """
         Write sample data to self.samples or add data.
-        kwargs: data, add (default add=False)
         
         """
         
         from riversand import params
         from riversand.utils import validate_nuclide, validate_sample
-        
-        if 'data' in kwargs.keys():
-            data = kwargs['data']
-        else:
-            raise TypeError("add_samples_from_dict() missing keyword argument 'data'")
             
         if isinstance(data, (pd.DataFrame)):
             raise NotImplementedError("add_samples_from_dict() not yet implemented for pandas DataFrame")
@@ -501,14 +543,14 @@ class Riversand():
         if not isinstance(data, (dict, pd.Series)):
             raise TypeError("add_samples_from_dict() 'data' must be dictionary")
         
-        if 'add' in kwargs.keys() and not (kwargs['add']==False):
-            add = True
-            if (self.samples is None) or not (isinstance(self.samples, pd.DataFrame)):
-                add = False # can only add to existing pd.DataFrame
-        else:
-            add = False
+        if add==False:
             self.samples = None
                 
+        if add==True and (
+                (self.samples is None) or
+                (not isinstance(self.samples, pd.DataFrame))):
+            add = False # can only add to existing data
+            
         topo_keys = ['lat', 'long', 'elevation']
         mandatory_keys = [k for k in params.all_keys if k not in topo_keys]  
         
@@ -542,242 +584,221 @@ class Riversand():
                 
             self.valid_catchments = None # set by self.validate()
         
-            
-    def validate(self, *args, **kwargs):
+    
+    def get_valid_catchments(self):
+        self.validate(verbose=False)
+        if self.valid_catchments is None:
+            return []
+        else:
+            return self.valid_catchments
+    
+        
+    def validate(self, multi:bool=None, verbose=True):
         """
         Validate Riversand object and print error report.
-                          
-        kwargs :
-            'verbose'=False : returns list of errors instead of printing report.
-            'dtype'=str : forces catchment dtype of 'single' or 'multi.
-                Raises ValueError if 'single' for a multi-polygon shapefile;
-                this is the only error this function should ever raise.
-        
+                 
         """
         
         from riversand.utils import validate_topo, validate_nuclide, validate_sample
         from riversand.utils import feature_in_raster
 
-        if 'verbose' in kwargs.keys():
-            verbose = kwargs['verbose']
-        else:
-            verbose = True
+        class ValidationError(Exception):
+            pass
+        
+        def val_R(self):
+            # adding a raster resets epsg and res to None anyways
+            self.epsg = None
+            self.res = None
             
-        if 'dtype' in kwargs.keys():
-            c_dtype = kwargs['dtype'] # 'single' or 'multi'
-        else:
-            c_dtype = None
+            if self.elevation is None:
+                raise ValidationError("No elevation raster defined")
+                
+            if (self.elevation.epsg is None) or (self.elevation.res is None):
+                raise ValidationError("Cannot determine projection or resolution of elevation raster")
             
-        args = [a[:6].lower() for a in args] # lowercase and clip to first 6 chars
-        args = ['raster' if a=='r' else a for a in args] # accept 'r', 'c', 's' as input
-        args = ['catchm' if a=='c' else a for a in args]
-        args = ['sample' if a=='s' else a for a in args]
-
-        if len(args)==0:
-            args = ['raster', 'catchm', 'sample']
-        
-        
-        
-        errR = None
-        errS = None
-        errC = None
-        
-        # validate raster datasets
-        if 'raster' in (arg.lower() for arg in args):
-            errR = []
+            proj_errs = 0
+            if self.shielding is not None:
+                proj_errs += int(self.shielding.epsg!=self.elevation.epsg)
+                proj_errs += int(self.shielding.res!=self.elevation.res)
+                #print("checking shielding "+str(proj_errs))
+            if self.quartz is not None:
+                proj_errs += int(self.quartz.epsg!=self.elevation.epsg)
+                proj_errs += int(self.quartz.res!=self.elevation.res)
+                #print("checking quartz "+str(proj_errs))
+            if proj_errs>0:
+                raise ValidationError("Conflicting projections in raster data")
             
-            if not self.elevation:
-                errR += ["No elevation raster defined"]
-            else:
-                proj_errs = 0
-                if self.shielding:
-                    if self.shielding.epsg != self.elevation.epsg:
-                        proj_errs += 1
-                    if self.shielding.res != self.elevation.res:
-                        proj_errs += 1
-                if self.quartz:
-                    if self.quartz.epsg != self.elevation.epsg:
-                        proj_errs += 1
-                    if self.quartz.res != self.elevation.res:
-                        proj_errs += 1
-                if proj_errs>0:
-                    errR += ["Conflicting projections in raster data"]
-                    
-            if errR:
+            self.epsg = self.elevation.epsg
+            self.crs = self.elevation.crs
+            self.res = self.elevation.res
+            return
+        
+        def val_S(self):
+            if (not isinstance(self.samples, pd.DataFrame)
+                or self.samples.empty):
+                raise ValidationError("No sample data defined")
+            
+            tmp = self.samples#.reset_index(drop=True) # do not modify self.samples 
+        
+            # (1) Validate that mandatory columns 'N','delN' exist
+            missing_columns = []
+            for mc in ['N', 'delN']:
+                if mc not in tmp.keys():
+                    missing_columns += [mc]
+            if len(missing_columns)>0:
+                raise ValidationError("Missing column(s): {}"
+                                      .format(", ".join(missing_columns)))
+                
+            # (2) Check row-wise that validation for online calculator will pass (only if no missing columns)
+            errors_in_line = []
+            for idx, item in tmp.iterrows():
+                this_line_error = False
+                try:
+                    _ = validate_nuclide(item)
+                except:
+                    this_line_error = True
+                try:
+                    _ = validate_sample(item)
+                except:
+                    this_line_error = True
+                if 'shielding' in tmp.keys():
+                    try:
+                        sf = float(item['shielding'])
+                        if not np.isnan(sf): # nan are allowed in shielding
+                            if not (0 <= sf <= 1): 
+                                this_line_error = True 
+                    except:
+                        this_line_error = True
+                if this_line_error:
+                    errors_in_line += [str(idx)]
+            if errors_in_line:
+                raise ValidationError("Invalid / missing data in line(s): {}"
+                                      .format(", ".join(errors_in_line)))
+            return
+        
+        def val_C(self, outR, multi=False): # outR is the outcome of the raster validation; should be []
+            self.valid_catchments = None
+            
+            if (not isinstance(self.catchments, Catchment)
+                or self.catchments is None):
+                raise ValidationError("No catchment data defined")
+            
+            if not outR==[]: # outR=None if not validated; outR=["err mssg"] if invalid 
+                raise ValidationError("No valid raster data, cannot validate shapefile projection")
+        
+            C_epsg = self.catchments.crs.to_epsg()
+            if C_epsg!=self.epsg:
+                temp = self.epsg # for display
                 self.epsg = None
-                self.res = None
-            else:
-                self.epsg = self.elevation.epsg
-                self.res = self.elevation.res
-
-        # validate sample datasets
-        if 'sample' in (arg.lower() for arg in args):
-            errS = []
+                self.crs = None
+                raise ValidationError("Shapefile projection (epsg={}) "
+                                      .format(C_epsg) +
+                                      "does not match raster projection (epsg={})"
+                                      .format(temp))
             
-            if ((self.samples is None) or
-                not isinstance(self.samples, pd.DataFrame) or
-                self.samples.empty):
-                errS += ["No sample data defined"]
-            else:
-                
-                tmp = self.samples.reset_index(drop=True)
-                
-                # (1) Validate that mandatory columns 'N','delN' exist
-                missing_columns = []
-                for mc in ['N', 'delN']:
-                    if mc not in tmp.keys():
-                        missing_columns += [mc]
-                if len(missing_columns)>0:
-                    errS += ["Missing column(s): {}".format(", ".join(missing_columns))]
-
-                # (2) Check row-wise that validation for online calculator will pass
-                if errS==[]:
-                    errors_in_line = []
-                    for idx, item in tmp.iterrows():
-                        this_line_error = False
-                        try:
-                            _ = validate_nuclide(item)
-                        except:
-                            this_line_error = True
-                        try:
-                            _ = validate_sample(item)
-                        except:
-                            this_line_error = True
-                        if 'shielding' in tmp.keys():
-                            try:
-                                sf = float(item['shielding'])
-                                if not np.isnan(sf): # nan are allowed in shielding
-                                    if not (0 <= sf <= 1): 
-                                        this_line_error = True 
-                            except:
-                                this_line_error = True
-                        if this_line_error:
-                            errors_in_line += [str(idx)]
-                    if errors_in_line:
-                        errS += ["Invalid / missing data in lines: {}"
-                                 .format(", ".join(errors_in_line))]
-        
-        # validate catchment
-        if 'catchm' in (arg.lower() for arg in args):
-            errC = []
+            nC = len(self.catchments.catchments)
+            if nC==0:
+                raise ValidationError("No polygons in shapefile")
             
-            if ((self.catchments is None) or
-                not isinstance(self.catchments, Catchment)):
-                errC += ["No catchment data defined"]
-            else:
-                # validate projection
-                if errR is None:
-                    errR = self.validate('raster', verbose=False)
-                if len(errR)>0:
-                    errC += ["Raster data invalid, cannot validate shapefile projection"]
-                else:
-                    C_epsg = self.catchments.crs.to_epsg()
-                    if C_epsg!=self.epsg:
-                        errC += ["Shapefile projection (epsg={}) "
-                                 .format(C_epsg) +
-                                 "does not match raster projection (epsg={})"
-                                 .format(self.epsg)]
+            # single-catchment dataset
+            if multi==False:
+                #print('single')
+                if nC>1:
+                    raise ValidationError("Not a single-catchment dataset ({} polygons)"
+                                          .format(nC))
+            
+                out_of_bounds = 0
+                rr = [r.src for r in [self.elevation, self.shielding, self.quartz]
+                     if r is not None]
+                for r in rr:
+                    try:
+                        fir = feature_in_raster(
+                            self.catchments.catchments[0]['geometry'], r)
+                        if not fir:
+                            out_of_bounds += 1
+                    except:
+                        pass
+                if out_of_bounds>0:
+                    raise ValidationError("Catchment polygon out of bounds of raster data")
                 
-                if c_dtype=='single':
-                    self.catchments.set_dtype('single')
-                if c_dtype=='multi':
-                    self.catchments.set_dtype('multi')
-                    
+            # multi-catchment dataset
+            if multi==True:
+                #print('multi')
+                if self.cid is None:
+                    raise ValidationError("No catchment identifier defined; use .set_cid()")
+                if self.cid not in self.catchments.attrs: # self.set_cid() does not allow to set an invalid cid
+                    raise ValidationError("Invalid catchment identifier cid='{}'; use .set_cid()"
+                                          .format(self.cid))
+                
+                c_names = (self.catchments.get_valid_names(self.cid))
+                try:
+                    s_names = list(self.samples['name'].values)
+                except:
+                    s_names = [] # empty list if no column 'name'
+                self.valid_catchments = [c for c in c_names if c in s_names]
+            return
+                
+                
+        # determine parameter 'multi' from the number of catchment polygons
+        if multi is None:
+            try:
                 nC = len(self.catchments.catchments)
-                if nC==0:
-                    errC += ["No polygons in shapefile"]
-                    
-                if (nC>1) and c_dtype=='single':
-                    raise ValueError("Cannot process as single-catchment"+
-                                     "dataset with {} polygons in shapefile"
-                                     .format(nC))
-                    
-                if (nC>1) and (self.catchments.dtype=='single'):
-                    self.catchments.set_dtype('multi')
-                
-                # validate multi-catchment
-                if self.catchments.dtype=='multi':
-                    if self.cid is None:
-                        errC += ["Multi-catchment shapefile; use .set_cid() "+
-                                 "to set catchment identifier"]
-                    elif self.cid not in self.catchments.attrs:
-                        errC += ["Multi-catchment shapefile with invalid cid='{}'\n"
-                                 .format(self.cid) +
-                                 "   use .set_cid()"]
-                    else:                        
-                        # valid catchment names, no duplicates, not null, sorted
-                        c_names = (self.catchments
-                                   .get_valid_names(self.cid))
-                        try:
-                            s_names = list(self.samples['name'].values)
-                        except:
-                            s_names = [] # empty list if no column 'name'
-                            
-                        self.valid_catchments = [c for c in c_names if c in s_names]
-  
-                # validate single-catchment
-                if self.catchments.dtype=='single':
-                    out_of_bounds = 0
-                    rr = [r.src for r in [self.elevation, self.shielding, self.quartz]
-                         if r is not None]
-                    for r in rr:
-                        try:
-                            fir = feature_in_raster(
-                                self.catchments.catchments[0]['geometry'],
-                                r)
-                            if fir==False:
-                                out_of_bounds += 1
-                        except:
-                            pass
-                    if out_of_bounds>0:
-                        errC += ["Catchment polygon out of bounds of {} raster dataset(s)"
-                                 .format(out_of_bounds)]
-                        
-            
-            if self.samples is None: # avoid empty list if self.samples is undefined
-                self.valid_catchments = None
-                
-                
-                    
-        # print output or return list of errors
-        if verbose:            
-            if errR is not None:
-                if errR:
-                    print("Errors in raster data:")
-                    for e in errR:
-                        print("   {}".format(e))
+            except:
+                multi = False # no catchment defined; doesn't matter
+            else:
+                if nC==1:
+                    multi = False
                 else:
-                    print("Raster data validated.")
-
-            if errS is not None:
-                if errS:
-                    print("Errors in sample data:")
-                    for e in errS:
-                        print("   {}".format(e))
-                else:
-                    print("Sample data validated.")
+                    multi = True
                     
-            if errC is not None:
-                if errC:
-                    print("Errors in catchment data:")
-                    for e in errC:
-                        print("   {}".format(e))
-                else:
-                    print("Catchment data validated.\n")
-                
-                if self.valid_catchments is not None:
-                    print("Catchments / samples cross-validated:")
-                    if len(self.valid_catchments)==0:
-                        print("   No matches found")
-                    else:
-                        print("   Found {} matche(s)".format(len(self.valid_catchments)))
-            return None
+        outR = outS = outC = None
+        try:
+            val_R(self)
+        except ValidationError as e:
+            outR = [e.args[0]]
         else:
-            errs = []
-            if errR: errs += errR
-            if errS: errs += errS
-            if errC: errs += errC
-            return errs
+            outR = []
+        
+        try:
+            val_S(self)
+        except ValidationError as e:
+            outS = [e.args[0]]
+        else:
+            outS = []
+        
+        try:
+            val_C(self, outR, multi=multi)
+        except ValidationError as e:
+            outC = [e.args[0]]
+        else:
+            outC = []
+                    
+        if verbose: # outX should never be None; [] or ["error message"]
+            print("")
+            if outR==[]:
+                print("Raster data valid")
+            else:
+                #print("\nErrors in raster data:")
+                print("{}".format(outR[0]))
+            if outS==[]:
+                print("Sample data valid")
+            else:
+                #print("\nErrors in sample data:")
+                print("{}".format(outS[0]))
+            if outC==[]:
+                print("Catchment data valid")
+            else:
+                #print("\nErrors in catchment data:")
+                print("{}".format(outC[0]))
+            if self.valid_catchments is not None:
+                print("\nValid catchments / samples:")
+                if len(self.valid_catchments)==0:
+                    print("   No matches found")
+                else:
+                    print("   Found {} match(es)".format(len(self.valid_catchments)))
+
+        else:
+            return outR, outS, outC
         
     
     def process_single_catchment(self,
@@ -818,27 +839,38 @@ class Riversand():
         import riversand.plot
         
         if scaling not in params.scalingmethods:
-            raise ValueError("Invalid scaling '{}' (must be 'St', 'Lm' or 'LSDn')")
+            raise ValueError("Invalid scaling '{}': must be 'St', 'Lm' or 'LSDn'")
         
+        if self.elevation is None:
+            raise ValueError("Missing elevation raster")
+        if self.samples is None:
+            raise ValueError("Missing sample data")           
+        if self.catchments is None:
+            raise ValueError("Missing catchment polygons") 
+            
         if isinstance(shielding, str):
             if shielding not in {'topo', 'sample'}:
-                raise ValueError("Invalid shielding (must be 'topo', 'sample' or numeric)")
+                raise ValueError("Invalid shielding: must be 'topo', 'sample' or numeric")
         if isinstance(shielding, Number):
             if not (0<=shielding<=1):
-                raise ValueError("Invalid shielding (must be 0..1)")
+                raise ValueError("Invalid shielding: must be 0..1")
+        if (shielding=='topo') and (self.shielding is None):
+            raise ValueError("Invalid shielding='topo' but no shielding raster available")
+        if (shielding=='sample') and ('shielding' not in self.samples.keys()):
+            raise ValueError("Invalid shielding='sample' but no shielding in sample data")
             
         if unit not in params.units.keys():
-            raise ValueError("Invalid unit '{}' (see params.units for valid options)"
+            raise ValueError("Invalid unit='{}': see params.units for valid options"
                              .format(unit))
             
         result_cols = ['name', 'scaling', 'nuclide',
                        'E', 'delE-', 'delE+', 'NRMSE', 'error']
         results = pd.DataFrame(columns=result_cols)
         
-        errors = self.validate(c_type='single', verbose=False)
-        if len(errors)>0:
-            print("Cannot validate 'rv' for single-catchment processing; "+
-                             "use 'rv.validate()' for details")
+        errR, errS, errC = self.validate(verbose=False, multi=False)
+        if len(errR+errS+errC)>0:
+            print("Cannot validate dataset for single-catchment processing; "+
+                             "use '.validate()' for details")
             return results
         
         if verbose:
@@ -859,7 +891,7 @@ class Riversand():
             if plot in ('jpg', 'auto'):
                 print("Saving plots as .jpg in '{}'".format(params.out_path))
             print("")
-            
+        
         try:
             clips = self.clip_all_rasters() # function calls self.validate()
         except ValueError as e:
@@ -876,10 +908,19 @@ class Riversand():
                 for label in clips.keys():
                     if label in Raster.dtypes:
                         riversand.plot.plot_clipped_raster(clips, c_name='',
-                                                 label=label, fname=plot)
+                                                 dtype=label, fname=plot)
                         
             topostats, summary = get_topostats(clips, bins=bins, centroid='from_clipped') # accepts iterable as bins
-        
+            
+            try: # mock textline to make sure that 'shielding' is set correctly
+                summary['elevation'] = 100
+                _ = get_textline(self.samples.iloc[0],
+                                 summary,
+                                 shielding=shielding)
+            except ValueError as e: # raised by get_textline() for invalid shielding
+                print(type(e).__name__, ":", e.args[0])
+                return results
+                
             for idx, sample_data in self.samples.iterrows(): # sample_data as pd.Series
                 
                 E = np.nan
@@ -911,7 +952,9 @@ class Riversand():
                     summary['elevation'] = summary['elevHi']
                     textline = get_textline(sample_data, summary, shielding=shielding)
                     E_Hi = get_E(textline) # erosion rates in cm/yr
-                except RuntimeError as e:
+                except ValueError as e: # raised by get_textline() for invalid shielding
+                    err = [e.args[0]]
+                except RuntimeError as e: # raised by get_E()
                     err = [e.args[0][10:]]
                     
                 else:
@@ -1006,17 +1049,28 @@ class Riversand():
         import riversand.plot
         
         if scaling not in params.scalingmethods:
-            raise ValueError("Invalid scaling '{}' (must be 'St', 'Lm' or 'LSDn')")
+            raise ValueError("Invalid scaling='{}': must be 'St', 'Lm' or 'LSDn'")
+            
+        if self.elevation is None:
+            raise ValueError("Missing elevation raster")
+        if self.samples is None:
+            raise ValueError("Missing sample data")           
+        if self.catchments is None:
+            raise ValueError("Missing catchment polygons")            
             
         if isinstance(shielding, str):
             if shielding not in {'topo', 'sample'}:
-                raise ValueError("Invalid shielding (must be 'topo', 'sample' or numeric)")
+                raise ValueError("Invalid shielding: must be 'topo', 'sample' or numeric")
         if isinstance(shielding, Number):
             if not (0<=shielding<=1):
-                raise ValueError("Invalid shielding (must be 0..1)")
+                raise ValueError("Invalid shielding: must be 0..1")
+        if (shielding=='topo') and (self.shielding is None):
+            raise ValueError("Invalid shielding='topo' but no shielding raster available")
+        if (shielding=='sample') and ('shielding' not in self.samples.keys()):
+            raise ValueError("Invalid shielding='sample' but no shielding in sample data")
             
         if unit not in params.units.keys():
-            raise ValueError("Invalid unit '{}' (see params.units for valid options)"
+            raise ValueError("Invalid unit='{}': see params.units for valid options"
                              .format(unit))
             
         result_cols = ['name', 'scaling', 'nuclide', 'qtz',
@@ -1024,10 +1078,10 @@ class Riversand():
         results = pd.DataFrame(columns=result_cols)
         results['name'] = self.samples['name']
 
-        errors = self.validate(c_type='multi', verbose=False)
-        if len(errors)>0:
-            print("Cannot validate 'rv' for multi-catchment processing; "+
-                  "use 'rv.validate()' for details")
+        errR, errS, errC = self.validate(verbose=False, multi=True)
+        if len(errR+errS+errC)>0:
+            print("Cannot validate dataset for multi-catchment processing; "+
+                  "use '.validate()' for details")
             return results
         
         if verbose:
@@ -1067,7 +1121,7 @@ class Riversand():
             delE = (np.nan, np.nan)
             NRMSE = np.nan
             error_code = None
-            
+
             name = sample_data['name']
             # nuclide and mineral from input or default value
             try:
@@ -1102,10 +1156,11 @@ class Riversand():
                             if label in Raster.dtypes:
                                 riversand.plot.plot_clipped_raster(
                                     clips, c_name=name,
-                                    label=label, fname=plot)
+                                    dtype=label, fname=plot)
                                 
                     topostats, summary = get_topostats(clips, bins=bins, centroid='from_clipped') # accepts iterable as bins
-                        
+                    
+                    
                     try:
                         # estimate minimum and maximum erosion rates
                         summary['elevation'] = summary['elevLo']
@@ -1115,11 +1170,14 @@ class Riversand():
                         summary['elevation'] = summary['elevHi']
                         textline = get_textline(sample_data, summary, shielding=shielding)
                         E_Hi = get_E(textline) # erosion rates in cm/yr
-                    except RuntimeError as e:
+                    except ValueError as e: # raised by get_textline() for invalid shielding
+                        print(type(e).__name__, ":", e.args[0])
+                        err = [e.args[0]]
+                    
+                    except RuntimeError as e: # raised by get_E()
                         error_code = e.args[0][10:]
-                        
                     else:
-                        
+            
                         # generate suitable erates
                         erates = guess_erates(E_Lo, E_Hi, scaling=scaling) # cm/yr
                         
@@ -1190,8 +1248,11 @@ class Riversand():
                 # 'Cannot compute uncertainty'
                 # 'Server cannot resolve erosion rates, dropping duplicates'
         
-        if 'quartz' not in clips.keys():
-            results.drop(columns=['qtz'], inplace=True)
+        try: # if all went wrong there might not be a variable clips
+            if 'quartz' not in clips.keys():
+                results.drop(columns=['qtz'], inplace=True)
+        except:
+            pass
         
         return results
     
@@ -1209,14 +1270,6 @@ class Riversand():
         if self.quartz:
             s += [str(self.quartz)+"\n"]   
             
-        if self.epsg or self.res:
-            s += ["Validated projection:"]
-            if self.epsg:
-                s += ["epsg  : {}".format(self.epsg)]
-            if self.res:
-                s += ["res   : {}".format(self.res)]
-            s += [""]
-            
         if not self.samples is None:
             s += ["---------------"]
             s += ["Sample data:"]
@@ -1226,6 +1279,15 @@ class Riversand():
             s += ["---------------"]
             s += ["Catchment polygons:\n"]
             s += [str(self.catchments)+"\n"]
+            
+        if self.epsg or self.res:
+            s += ["---------------"]
+            s += ["Validated projection:"]
+            if self.epsg:
+                s += ["epsg  : {}".format(self.epsg)]
+            if self.res:
+                s += ["res   : {}".format(self.res)]
+            s += [""]
             
         if self.valid_catchments is None:
             pass
@@ -1258,16 +1320,18 @@ class Riversand():
         if n is None:
             n=0
         
-        val_errs = self.validate('raster', 'catchment', verbose=False)
-        if len(val_errs)>0:
+        #if self.epsg is None:
+        #    print("WARNING : dataset does not seem validated, run .validate()")
+        errR, errS, errC = self.validate(verbose=False)
+        if len(errR+errC)>0:
             raise ValueError("Cannnot validate 'rv'; use 'rv.validate()' for details")
         
         try:
             polygon = self.catchments.catchments[n]['geometry'] # raises IndexError
-            try:
-                c_name = self.catchments.catchments[n]['properties'][self.cid]
-            except:
-                c_name = '' # for Exception message
+            #try:
+            #    c_name = self.catchments.catchments[n]['properties'][self.cid]
+            #except:
+            #    c_name = '' # for Exception message
         except IndexError as e:
             raise ValueError("clip_all_rasters() : 'catchments' does not have "+
                              "n={} polygons".format(n))
@@ -1295,15 +1359,7 @@ class Riversand():
 
 
 def main():
-    """ Testing geospatial.py """
-    
-    import sys, os
-    
-    rootdir = "/home/user/Dokumente/11_catchment_erates_calculator/2022 CatchCalc_v0/riversand-1.0"
-    sys.path.append(rootdir)
-    path = os.path.join(rootdir, "tests/test_data")
-    
-    import riversand
+    pass
     
         
 if __name__ == "__main__":
