@@ -25,7 +25,7 @@ params.py  :  default parameters
 """
 
 import os
-out_path = './plots'
+out_path = 'plots'
 if not os.path.exists(out_path):
     os.makedirs(out_path)
 

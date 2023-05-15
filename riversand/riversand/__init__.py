@@ -12,5 +12,4 @@ from riversand.calc import poly_E_results, get_RMSE
 
 import riversand.params as params
 
-
-
+from riversand._version import __version__

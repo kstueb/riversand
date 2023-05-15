@@ -36,6 +36,7 @@ The project is validated with .validate()
 Calculations are performed with:
 results = rv.process_single_catchment()
 results = rv.process_multi_catchment()
+results = rv.catchment_stats()
     
 The current version of the online calculator is obtained from calc.py
 version = calc.get_version()
@@ -848,6 +849,9 @@ class Riversand():
         if self.catchments is None:
             raise ValueError("Missing catchment polygons") 
             
+        if len(self.catchments.catchments)>1:
+            raise ValueError("Use .process_multi_catchment() if shapefile has more than one polygon")
+            
         if isinstance(shielding, str):
             if shielding not in {'topo', 'sample'}:
                 raise ValueError("Invalid shielding: must be 'topo', 'sample' or numeric")
@@ -863,8 +867,9 @@ class Riversand():
             raise ValueError("Invalid unit='{}': see params.units for valid options"
                              .format(unit))
             
+            
         result_cols = ['name', 'scaling', 'nuclide',
-                       'E', 'delE-', 'delE+', 'NRMSE', 'error']
+                       'E', 'delE-', 'delE+', 'NRMSE', 'Tavg', 'error']
         results = pd.DataFrame(columns=result_cols)
         
         errR, errS, errC = self.validate(verbose=False, multi=False)
@@ -994,10 +999,12 @@ class Riversand():
                     results.loc[idx, 'name'] = name    
                     results.loc[idx, 'scaling'] = scaling
                     results.loc[idx, 'nuclide'] = nuclide
+                    
                     results.loc[idx, 'E'] = E
                     results.loc[idx, 'delE-'] = delE[0]
                     results.loc[idx, 'delE+'] = delE[1]
                     results.loc[idx, 'NRMSE'] = NRMSE
+                    results.loc[idx, 'Tavg'] = np.round(160/sample_data['density']/E,)
             
                     if err==[]:
                         results.loc[idx, 'error'] = ''
@@ -1011,6 +1018,7 @@ class Riversand():
         
         return results
     
+        
     def process_multi_catchment(self,
             bins=500, scaling='LSDn', shielding=1, unit='mm/yr',
             plot=None,
@@ -1073,8 +1081,9 @@ class Riversand():
             raise ValueError("Invalid unit='{}': see params.units for valid options"
                              .format(unit))
             
+            
         result_cols = ['name', 'scaling', 'nuclide', 'qtz',
-                       'E', 'delE-', 'delE+', 'NRMSE', 'error']
+                       'E', 'delE-', 'delE+', 'NRMSE', 'Tavg', 'error']
         results = pd.DataFrame(columns=result_cols)
         results['name'] = self.samples['name']
 
@@ -1221,12 +1230,13 @@ class Riversand():
             results.loc[idx, 'name'] = sample_data['name']   
             results.loc[idx, 'scaling'] = scaling
             results.loc[idx, 'nuclide'] = nuclide
-            results.loc[idx, 'qtz'] = 100-Qpc
+            results.loc[idx, 'qtz'] = np.round(100-Qpc,1)
                         
             results.loc[idx, 'E'] = E
             results.loc[idx, 'delE-'] = delE[0]
             results.loc[idx, 'delE+'] = delE[1]
             results.loc[idx, 'NRMSE'] = NRMSE
+            results.loc[idx, 'Tavg'] = np.round(160/sample_data['density']/E,)
                 
             if error_code:
                 if verbose:
@@ -1256,7 +1266,89 @@ class Riversand():
         
         return results
     
+    
+    def catchment_stats(self,
+            bins=100, verbose=True) -> pd.DataFrame:
+        """
+        Calculate topo statistics for a multi-catchment shapefile.
+        
+        Parameters
+        ----------
+        bins : numeric, optional
+            bin size in meters for elevation binning. The default is 500.
+    
+        Returns
+        -------
+        results : pd.DataFrame
+            Table of results for each sample.
+            
+        """
+        
+        from riversand.utils import eliminate_quartzfree, get_topostats
+        
+        if self.elevation is None:
+            raise ValueError("Missing elevation raster")
+        if self.samples is None:
+            raise ValueError("Missing sample data")           
+        if self.catchments is None:
+            raise ValueError("Missing catchment polygons")
+            
+        # # multi / single is determined by the number of polygons but cid must be set to identify the polygons
+        # if self.cid is None:
+        #     raise ValueError("No catchment identifier defined; use .set_cid()")
+        # if self.cid not in self.catchments.attrs: # self.set_cid() does not allow to set an invalid cid
+        #     raise ValueError("Invalid catchment identifier cid='{}'; use .set_cid()"
+        #                                   .format(self.cid))
+            
+        topo_cols = ['name', 'centr_lat', 'centr_long', 'mean_elev',
+                     'relief', 'area', 'mean_sf', 'qtz_pc']
+        results = pd.DataFrame(columns=topo_cols)
+            
+        errR, errS, errC = self.validate(verbose=False) # 'multi' determined from number of catchments
+        if len(errR+errS+errC)>0:
+            print("Cannot validate dataset; "+
+                  "use '.validate()' for details")
+            return results
 
+        if verbose:
+            print("Processing ", end="")
+            end = ""
+            
+        for idx, c in enumerate(self.catchments.catchments):
+            if self.cid:
+                name = c['properties'][self.cid]
+            else:
+                name = ""
+            results.loc[idx, 'name'] = name
+            if verbose:
+                print(end+name, end="")
+                end = ", "
+                
+            try:
+                clips = self.clip_all_rasters(idx) # function calls rv.validate()
+            except ValueError as e:
+                results.loc[idx, 'error'] = 'catchment out of bounds'
+            else:
+                if 'quartz' in clips.keys():
+                    clips, Qpc = eliminate_quartzfree(clips, verbose=False, Qpc=True)
+                    results.loc[idx, 'qtz_pc'] = np.round(100-Qpc,1)
+                topostats, summary = get_topostats(clips, bins=bins, centroid='from_clipped') # accepts iterable as bins
+                
+                results.loc[idx, 'area'] = summary['areakm2']
+                results.loc[idx, 'relief'] = np.nanmax(clips['elevation'])-np.nanmin(clips['elevation'])
+                if 'shielding' in clips.keys():
+                    results.loc[idx, 'mean_sf'] = np.nanmean(clips['shielding'])
+                results.loc[idx, 'centr_lat'] = summary['lat']
+                results.loc[idx, 'centr_long'] = summary['long']
+                results.loc[idx, 'mean_elev'] = np.nanmean(clips['elevation'])
+        
+        if verbose:
+            print(" finished.")
+        
+        results = results.sort_values(by=['name'], ignore_index=True)
+        
+        return results
+    
     
     def __repr__(self):
         s = []
