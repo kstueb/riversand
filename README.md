@@ -23,7 +23,7 @@ the effect of latitude on cosmogenic production may become significant.
 
 The approach is described in:
 
-Stübner, K., Balco, G., and Schmeisser, N. (in review). Calculating catchmentwide
+Stübner, K., Balco, G., and Schmeisser, N. (accepted). Calculating catchmentwide
 erosion rates using an existing online calculator. *Radiocarbon*.
 
 Definitely check out the documentation of the online calculator (e.g. [here](http://stoneage.ice-d.org/math/docs/v3/v3_input_explained.html)
