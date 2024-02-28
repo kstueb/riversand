@@ -1,6 +1,6 @@
 Catchmentwide erosion rates with riversand 
 ------------------------------------------
-Latest version: riversand-1.2.2 uploaded 28. Feb. 2024
+**Latest version**: riversand-1.2.2 uploaded 28. Feb. 2024
 
 `riversand` is a python package to calculate catchmentwide erosion rates from
 cosmogenic nuclide concentrations in river sand samples. The program computes
