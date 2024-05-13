@@ -1,0 +1,8 @@
+numpy
+scipy
+pandas
+xarray
+rasterio
+pyproj
+fiona
+matplotlib
