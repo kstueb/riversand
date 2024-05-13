@@ -1,6 +1,5 @@
 Catchmentwide erosion rates with riversand 
 ------------------------------------------
-**Latest version**: riversand-1.2.2 uploaded 28. Feb. 2024
 
 `riversand` is a python package to calculate catchmentwide erosion rates from
 cosmogenic nuclide concentrations in river sand samples. The program computes
@@ -33,8 +32,8 @@ before using this calculator.
 
 Documentation
 -------------
-- [`quickstart.ipynb`](https://github.com/kstueb/riversand/blob/main/riversand/example_scripts/quickstart_v20240228.ipynb)
-- [`step_by_step.ipynb`](https://github.com/kstueb/riversand/blob/main/riversand/example_scripts/step_by_step_v20240228.ipynb)
+- [`quickstart.ipynb`](https://github.com/kstueb/riversand/blob/main/riversand/example_scripts/quickstart_v1.2.3.ipynb)
+- [`step_by_step.ipynb`](https://github.com/kstueb/riversand/blob/main/riversand/example_scripts/step_by_step_v1.2.3.ipynb)
 - [`test_data/`](https://github.com/kstueb/riversand/blob/main/riversand/example_scripts/test_data) : geotiffs of a 35m-resolution digital elevation model, a topographic shielding raster generated with [TopoToolbox](https://topotoolbox.wordpress.com/) and a binary raster indicating quartz-bearing and quartz-free lithologies; shapefiles with catchment outlines; a spreadsheet with sample data. 
 
 Installation
