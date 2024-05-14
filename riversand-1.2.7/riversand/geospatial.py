@@ -553,34 +553,17 @@ class Riversand():
         df = pd.DataFrame()
         
         try:
-            df = pd.read_csv(fname)
+            df = pd.read_csv(fname, sep=None, engine='python') # python engine automatically detects separator
             
-            # I believe this is only needed for csv files
-            for c in df.columns:
-                try:
-                    df[c] = df[c].str.strip(' \n\t')
-                except:
-                    pass
         except:
             try:
-                xls = pd.ExcelFile(fname)
-            except ImportError as e:
-                raise e
-            except IOError as e:
-                if e.errno==2:
-                    raise FileNotFoundError("{}: No such file or directory"
-                                            .format(e.filename))
-                else:
-                    raise e
-            else:
-                df = xls.parse(0) # imports the first sheet no matter the name
-    
-        for c in df.columns:
-            c_new = c.strip(' \n\t')
-            df.rename(columns={c: c_new}, inplace=True)
+                df = pd.read_excel(fname) # imports the first sheet no matter the name
+            except:
+                #print("Failing to read input as csv or excel file.")
+                pass
         
         if df.empty:
-            raise ValueError("No sample data in file")
+            raise ValueError("Failing to read file / no sample data in file")
         
         # sorting as in Params.all_keys w/o topographic and other info at end 
         topo_keys = ['lat', 'latitude', 'lon', 'long', 'longitude', 'elev', 'elevation']
@@ -597,6 +580,7 @@ class Riversand():
             if d in Params.default_values.keys(): # excluding standardization
                 self.samples[d] = Params.default_values[d]
         if 'standardization' in set_default:
+            self.samples['standardization'] = self.samples['standardization'].astype(str)
             self.samples.loc[self.samples['nuclide']=='Be-10', 'standardization']=Params._default_standards['Be-10']
             self.samples.loc[self.samples['nuclide']=='Al-26', 'standardization']=Params._default_standards['Al-26']
 

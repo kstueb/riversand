@@ -6,7 +6,7 @@ this_directory = Path(__file__).parent
 long_description = (this_directory / "README.md").read_text()   
 setup(                                
    name = 'riversand',
-   version = '1.2.2',
+   version = '1.2.7',
    packages = ['riversand'],
    author = 'Konstanze Stuebner',
    author_email = 'kstueb@gmail.com',

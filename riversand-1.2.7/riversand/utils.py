@@ -371,7 +371,7 @@ def restandardize(df) -> pd.DataFrame:
     
     df['_N'], df['_delN'], df['_standardization'] = df['N'], df['delN'], df['standardization']
     
-    df['N'], df['delN'], df['standardization'] = np.nan, np.nan, np.nan
+    df['N'], df['delN'], df['standardization'] = np.nan, np.nan, ''
     
     nucls = ['Be-10', 'Al-26']
     stdss = [pd.Series(Params.Be_stds), pd.Series(Params.Al_stds)]
