@@ -1,3 +1,14 @@
+------------
+**NEW in version 1.2.7** (released 2024-0-15):
+----------------------------------------------
+Use functions `get_ages_from_server()` and `get_erates_from_server()` to obtain
+point-based exposure ages and erosion rates calculated by the online calculator
+from sample data in your Excel spreadsheet and save the results as spreadsheet.
+
+See updated documentation [`quickstart.ipynb`](https://github.com/kstueb/riversand/blob/main/example_scripts/quickstart_v1.2.7.ipynb)
+
+------------
+
 Catchmentwide erosion rates with riversand 
 ------------------------------------------
 
