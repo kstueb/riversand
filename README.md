@@ -1,7 +1,7 @@
 ------------
 **NEW in version 1.3** (released 2024-06-04):
 ----------------------------------------------
-Improved lithological ('quartz') weighing functions.
+Updated lithological ('quartz') weighing functions.
 
 Use functions `get_ages_from_server()` and `get_erates_from_server()` to obtain
 point-based exposure ages and erosion rates calculated by the online calculator
