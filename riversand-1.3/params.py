@@ -23,9 +23,10 @@ params.py  :  default parameters
 *******************************************************************************
 
 """
+import os
 
 class Params:
-    out_path = 'plots'
+    out_path = './plots'
 
     #url = "https://hess.ess.washington.edu/cgi-bin/matweb"
     url = "http://stoneage.hzdr.de/cgi/matweb"
@@ -74,10 +75,18 @@ class Params:
                 'lat', 'latitude', 'long', 'longitude', 'elev', 'elevation',
                 'press_flag', 'thickness', 'density', 'shielding', 'erate', 'year',
                 'nuclide', 'mineral', 'N', 'delN', 'standardization']
-    
+            
     @classmethod
     def set_outpath(cls, value):
-        cls.out_path = value
+        try:
+            os.makedirs(value)
+        except FileExistsError:
+            cls.out_path = value
+        except PermissionError:
+            print("No permission to make directory '{}'; saving plots to '{}'."
+                  .format(value, cls.out_path))
+        else:
+            cls.out_path = value
 
 
 def set_folder(value):

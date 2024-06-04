@@ -37,7 +37,6 @@ restandardize()
 Geospatial processing functions:
     feature_in_raster()
     clip_raster()
-    eliminate_quartzfree()
     get_xarray_centroid()
     get_polygon_centroid()
     projected_xy_to_longlat()
@@ -186,17 +185,17 @@ def validate_nuclide(item) -> dict:
         
         
     try:
-        out['N'] = round(float(item['N'])) # accepts string "1.2E+6"
+        out['N'] = float(item['N']) # accepts string "1.2E+6"
     except: # ValueError (e.g. str) / TypeError (e.g. list)
         raise ValueError("Concentration N is not a number") from None
-    if out['N'] <= 0:
+    if not out['N'] > 0:
         raise ValueError("Concentration N is 0 or less")
         
     try:
-        out['delN'] = round(float(item['delN']))
+        out['delN'] = float(item['delN'])
     except: # ValueError (e.g. str) / TypeError (e.g. list)
         raise ValueError("Uncertainty delN is not a number") from None
-    if out['delN'] <= 0:
+    if not out['delN'] > 0:
         raise ValueError("Uncertainty delN is 0 or less")
         
     # optional keys with default values:
@@ -420,17 +419,22 @@ def feature_in_raster(polygon:dict, src:rasterio.DatasetReader) -> bool:
 
 
 def clip_raster(polygon:dict, src:rasterio.DatasetReader,
-                label:str) -> xr.DataArray:
+                label:str,
+                name='') -> xr.DataArray:
     """
     Clip raster with catchment polygon and return as xr.DataArray
-    with attributes attrs['transform'] and attrs['label'].
+    with attributes 'transform', 'label' and 'name'.
+    > clip['elevation'].attrs['name']
     
     Parameters
     ----------
     polygon : dict
-        > polygon = catchment.catchments[0]['geometry']
+        > polygon = rv.catchment.catchments[0]['geometry']
     label : str
         'elevation', 'shielding', 'quartz'
+    name : str
+        catchment name
+        > rv.catchments.catchments[0].properties[rv.cid]
     
     Raises
     ------
@@ -456,7 +460,7 @@ def clip_raster(polygon:dict, src:rasterio.DatasetReader,
         Z, Z_transform = rasterio.mask.mask(src, [polygon], nodata=np.nan,
                                             crop=True)
         
-    except TypeError as e: # recast raster to float to facilitate nodata=nan
+    except TypeError: # recast raster to float to facilitate nodata=nan
         data = src.read()
         profile = src.profile
         src.close()
@@ -492,46 +496,9 @@ def clip_raster(polygon:dict, src:rasterio.DatasetReader,
     
     Z.attrs['transform'] = Z_transform
     Z.attrs['label'] = label
+    Z.attrs['name'] = name
     
     return Z
-
-
-def eliminate_quartzfree(clips:dict, verbose=True, Qpc=False) -> dict:
-    """
-    Removes the quartz-free areas of a catchment determined from the 'quartz'
-    raster from all xr.DataArrays in clips.
-    
-    This function does not modify the values of clips.
-    
-    clips : dict
-        Keys 'quartz', 'elevation', 'shielding'.
-        The key 'epsg' set by clip_all_rasters() is ignored.
-    
-    """
-    
-    if 'quartz' not in clips.keys():
-        raise ValueError("eliminate_quartzfree() argument 'clips' missing "+
-                         "required key 'quartz'")
-    
-    XX = deepcopy(clips)
-    
-    quartzfree_pc = 0
-    
-    for dtype in ['elevation', 'shielding']:        
-        if dtype in XX.keys():
-            A0 = int(XX[dtype].count())
-            XX[dtype] = XX[dtype].where(XX['quartz']==1)
-            A1 = int(XX[dtype].count())
-            quartzfree_pc = 100*(A0-A1)/A0
-
-    if verbose:
-        print("Removed {:.1f} % of the catchment as quartz-free"
-              .format(quartzfree_pc))
-    
-    if Qpc:
-        return XX, quartzfree_pc # how much quartz-free (percent) has been removed
-    else:
-        return XX
 
 
 def get_xarray_centroid(X:xr.DataArray) -> tuple:
@@ -545,14 +512,20 @@ def get_xarray_centroid(X:xr.DataArray) -> tuple:
     Returns
     -------
     (centr_x, centr_y) : tuple of floats
-        Projected longitude, latitude.
+        Projected longitude, latitude. 
     
+    Raises
+    ------
+    RuntimeError
+        "empty xarray" if no values in X>0 (may be caused by quartz correction).
+        
     """
 
     A = xr.DataArray((X.values>0), coords=X.coords)
+    if sum(sum(A))==0:
+        raise RuntimeError('empty xarray')
     centr_x = float(np.sum(A.sum('y')/np.sum(A.sum('y')) * A.x))
     centr_y = float(np.sum(A.sum('x')/np.sum(A.sum('x')) * A.y))
-
     return (centr_x, centr_y)
 
     
@@ -572,7 +545,7 @@ def get_polygon_centroid(polygon:dict) -> tuple:
     """
     
     if 'coordinates' not in polygon.keys():
-        raise TypeError("get_polygon_centroid() argument 'polygon' not a valid polygon dictionary")
+        raise TypeError("argument 'polygon' not a valid polygon dictionary")
         
     from shapely.geometry import Polygon
         
@@ -598,6 +571,9 @@ def projected_xy_to_longlat(xy:tuple, epsg:int) -> tuple:
     
     """
     
+    if np.nan in xy:
+        return (np.nan, np.nan)
+
     from pyproj import Transformer
     # note that 4326 is lat/lon, whereas utm is x/y
     # use option always_xy=True to avoid trouble
@@ -639,7 +615,7 @@ def get_topostats(clips, bins, centroid='from_clipped',
         Keys are raster dtypes ('elevation', 'shielding, ...).
         Values have attributes .transform (Affine) and .label (dtype).
         Additional key 'epsg' has the projection.
-        > clips = geospatial.clip_all_rasters(rv)
+        > clips = rv.clip_all_rasters(n)
             
     centroid : str or tuple
         "from_clipped" or (long, lat) in projected coordinates.
@@ -652,6 +628,14 @@ def get_topostats(clips, bins, centroid='from_clipped',
         Percentile elevations (35, 50, 65%) and centroid coordinates.
         Keys are 'elevLo', 'elev50', 'elevHi', 'lat', 'long', 'areakm2'.
         
+    Raises
+    ------
+    ValueError
+        "epsg cannot be determined from 'clips'; specify as keyword argument"
+        "argument 'clips' with non-matching shape/resolution"
+        "argument 'clips' with non-matching transforms"
+    TypeError
+        "centroid must be string 'from_clipped' or tuple (long, lat)"
     """
 
     from riversand.geospatial import Raster
@@ -674,27 +658,26 @@ def get_topostats(clips, bins, centroid='from_clipped',
         raise TypeError("centroid must be string 'from_clipped' "+
                         "or tuple (long, lat)")
     
-    # Z is xr.DataArray of elevation raster
+    # Z: xr.DataArray of elevation raster
     Z = clips['elevation']
-    # XX are all valid raster datasets; specifically excluding clips['epsg']
+
+    # XX: dict of valid raster datasets; specifically excluding clips['epsg'] and clips['name']
     XX = dict([(key,val) for key,val in clips.items() if key in Raster.dtypes])
     
     # Perform some validation of the xr.DataArrays.
     # should be redundant if clips = clip_all_rasters()
-    if len(clips)>1:
+    if len(XX)>1:
         shape = Z.shape #clips['elevation']
         
         for X in XX.values(): 
             if not X.shape==shape:
-                raise ValueError("get_topostats() argument 'clips' with "+
-                                 "non-matching shape/resolution")
+                raise ValueError("argument 'clips' with non-matching shape/resolution")
 
         if validate_transforms:
             transform = clips['elevation'].transform
             for X in XX.values():
                 if not X.transform==transform:
-                    raise ValueError("get_topostats() argument 'clips' with "+
-                                     "non-matching transforms")
+                    raise ValueError("argument 'clips' with non-matching transforms")
 
     
     # Compute bins and centroid coordinates
@@ -702,8 +685,13 @@ def get_topostats(clips, bins, centroid='from_clipped',
         bins = get_bins(Z, bins)
     
     if centroid=='from_clipped':
-        (centr_x, centr_y) = projected_xy_to_longlat(
-                                              get_xarray_centroid(Z), epsg)
+        try:
+            (centr_x, centr_y) = get_xarray_centroid(Z)
+        except RuntimeError: # raised by get_xarray_centroid() for empty xarray
+            (centr_x, centr_y) = (np.nan, np.nan)
+            
+        (centr_x, centr_y) = projected_xy_to_longlat((centr_x, centr_y), epsg)
+            
     elif centroid=='from_polygon':
         (centr_x, centr_y) = projected_xy_to_longlat(
                                        get_polygon_centroid(polygon), epsg)
@@ -714,44 +702,59 @@ def get_topostats(clips, bins, centroid='from_clipped',
     area_per_pixel = np.abs(clips['elevation'].transform[0] * 
                             clips['elevation'].transform[4])/1000000 # in km2
     
+    if 'quartz' in XX.keys():
+        #print("correcting for quartz distribution")
+        # shielding and elevation raster weighted by quartz:
+        for key, val in XX.items():
+            if key!='quartz':
+                XX[key] = val*XX['quartz']
+    else:
+        # normalize to 1
+        XX['quartz'] = XX['elevation']*0+1
+    
     # Z denotes elevation raster
     # X denotes any other raster
     df = pd.DataFrame()
     i = 0
     for this_bin in zip(bins[:-1], bins[1:]):
+    #for this_bin in zip([bins[1]], [bins[2]]):
         X_bins = {} #dict of rasters for the current bin
+        # create mask layer: 1: pixel elevation in this_bin; 0: below this_bin; 2: above this_bin or nan
         Z_bin = xr.apply_ufunc(np.digitize, Z, this_bin)
+        # mask each (quartz-weighted) raster to the elevations of this_bin
         for key, val in XX.items():
-            X_bins[key] = val.where(Z_bin==1) # select the appropriate bin
-    
+            X_bins[key] = val.where(Z_bin==1)
+            
+            
         if np.count_nonzero(~np.isnan(Z_bin))>0:
             temp = pd.DataFrame({'bin': this_bin[0], 'bin1': this_bin[1]}|
-                                {key: np.nanmean(val) for key, val in X_bins.items()}|
-                                {'area': np.count_nonzero(~np.isnan(X_bins['elevation']))*area_per_pixel,
+                                {key: np.nansum(val) for key, val in X_bins.items()}|
+                                {'area_px': np.count_nonzero(~np.isnan(X_bins['elevation'])),
                                  'lat': centr_y, 'long': centr_x}, index = [i])
             df = pd.concat([df, temp], ignore_index=True, sort=False)
             i += 1
             
-    df['wt'] = df['area']/sum(df['area'])
+    for key in XX.keys():
+        if key!='quartz':
+            df[key] = df[key]/df['quartz']
+    df['wt'] = df['quartz']/df['quartz'].sum()
+    df['area'] = df['area_px']*area_per_pixel # area in km2
+    df = df.loc[df['quartz']>0] # exclude bins with no quarzt contribution
     
     #df.insert(0, 'bins', list(zip(df.bin0, df.bin1)))
     #df.drop(columns=['bin0', 'bin1'], inplace=True)
-    df.drop(columns=['bin1'], inplace=True)
-    
-    # no harm having a quartz columns
-    if 'quartz' in df.columns:
-        df.drop(columns='quartz', inplace=True)
-    
+    df.drop(columns=['bin1', 'area_px', 'quartz'], inplace=True)
+        
     summary = {
-        'elevLo' : np.nanpercentile(Z, 35),
+        'elevLo' : np.nanpercentile(Z, 30),
         'elev50' : np.nanpercentile(Z, 50.),
-        'elevHi' : np.nanpercentile(Z, 65),
+        'elevHi' : np.nanpercentile(Z, 70),
         'lat' : centr_y,
         'long' : centr_x,
         'areakm2' : sum(df['area'])
         }
     for k, v in clips.items():
-        if k not in ('elevation', 'epsg'):
+        if k not in ('elevation', 'epsg', 'name'):
             summary[k] = np.nanmean(v)
     summary['epsg'] = epsg # avoids that epsg is storead as float
     
@@ -820,6 +823,10 @@ def import_data(df:pd.DataFrame) -> pd.DataFrame:
     # nuclide concentrations <= 0 are silently excluded
     # uncertainties <= 0 raise ValueError "Be uncertainty must be >0."
 
+    #strip leading/trailing spaces from all strings
+    df_obj = df.select_dtypes('object')
+    df[df_obj.columns] = df_obj.apply(lambda x: x.str.strip())
+    
     dfS, dfN = import_data2(df)
     # raises TypeError if input is not a pd.DataFrame
     # prints messages and returns empty dfS, dfN if input is faulty
@@ -1372,9 +1379,9 @@ def get_textblock(df) -> str:
             out3 = validate_sample(d) # 'press_flag', 'density', 'thickness', 'erate', 'year'
         except ValueError as e:
             raise e
-        out = {**out1, **out3}    
+        out = {**out1, **out3}
             
-        textline = "{} {:.5f} {:.5f} {:.3f} {} {} {} {:.5f} {:.5f} {};".format(
+        textline = "{} {:.3e} {:.3e} {:.4e} {} {} {} {:.3e} {:.3e} {};".format(
             d['name'], out['lat'], out['long'], out['elevation'], out['press_flag'],
             out['thickness'], out['density'], out['shielding'], out['erate'], out['year'])
         return textline

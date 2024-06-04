@@ -43,7 +43,7 @@ version = calc.get_version()
 
 """
 
-import os, sys
+import os
 
 import numpy as np
 import pandas as pd
@@ -51,7 +51,6 @@ from pandas.api.types import is_numeric_dtype
 
 import collections
 from numbers import Number
-from copy import deepcopy
 
 import rasterio
 import rasterio.crs
@@ -67,6 +66,11 @@ from riversand.params import Params
 import warnings
 warnings.filterwarnings("error") # convert warnings to raise exceptions
 
+
+class OutOfBoundsError(Exception):
+    # used by clip_all_rasters() and caught by process_single/multi_catchment()
+    pass
+
 # =============================================================================
 # Raster datasets
 # =============================================================================
@@ -75,18 +79,24 @@ def get_geotiff(fname:str) -> rasterio.DatasetReader:
     """ Get file handle to geotiff. """
 
     src = None
-    
+    mn = None
+    mx = None
     if not os.path.isfile(fname):
         raise FileNotFoundError("{}: No such file or directory".format(fname))
     
     try:
         src = rasterio.open(fname, 'r')
+        mn = np.nanmin(src.read())
+        mx = np.nanmax(src.read())
         src.close()
     except rasterio.errors.NotGeoreferencedWarning as e:
         raise pyproj.exceptions.CRSError(e.args[0]) # 'Dataset has no geotransform, gcps, or rpcs. The identity matrix will be returned.'
     except:# rasterio.RasterioIOError as error:
         pass
     
+    if not src is None:
+        src.min = mn
+        src.max = mx
     return src
 
 
@@ -125,6 +135,9 @@ class Raster():
             self.crs = CRS(src.crs)
             self.epsg = self.crs.to_epsg() # may be None
             self.res = src.res # resolution, tuple
+            self.min = src.min
+            self.max = src.max
+            
             
             if self.crs.is_projected==False:
                 raise pyproj.exceptions.CRSError(
@@ -141,11 +154,12 @@ class Raster():
     def __repr__(self):
        
         s = []
-        s += ["dtype : {}".format(self.dtype)]
-        s += ["fname : {}".format(self.fname)]
-        s += ["src   : {}".format(self.src)]
-        s += ["epsg  : {}".format(self.epsg)]
-        s += ["res   : {}".format(self.res)]
+        s += ["dtype  : {}".format(self.dtype)]
+        s += ["fname  : {}".format(self.fname)]
+        s += ["src    : {}".format(self.src)]
+        s += ["epsg   : {}".format(self.epsg)]
+        s += ["res    : {}".format(self.res)]
+        s += ["values : {} to {}".format(self.min, self.max)]
         return "\n".join(s)
 
 # =============================================================================
@@ -318,15 +332,15 @@ class Catchment():
     def __repr__(self):
         s = []
         #s += ["dtype : {}".format(self.dtype)]
-        s += ["fname : {}".format(self.fname)]
-        s += ["src   : {}".format(self.src)]
+        s += ["fname  : {}".format(self.fname)]
+        s += ["src    : {}".format(self.src)]
         
-        s += ["attrs : {}".format(self.attrs)]
-        s += ["len   : {}".format(len(self.catchments))]
-        s += ["epsg  : {}".format(self.epsg)]
+        s += ["attrs  : {}".format(self.attrs)]
+        s += ["len    : {}".format(len(self.catchments))]
+        s += ["epsg   : {}".format(self.epsg)]
         
         if self.cid:
-            s += ["cid   : {}".format(self.cid)]
+            s += ["cid    : {}".format(self.cid)]
         
         return "\n".join(s)
 
@@ -366,6 +380,7 @@ class Riversand():
         self.path_to_data = None
         self.elevation = None # Raster object
         self.shielding = None # Raster object
+        #self.snow = None # Raster object
         self.quartz = None # Raster object
         
         self.res = None # project resolution
@@ -412,8 +427,25 @@ class Riversand():
                 self.elevation = Raster(fname, dtype)
             elif dtype=='shielding':
                 self.shielding = Raster(fname, dtype)
+                if not self.elevation is None:
+                    if self.shielding.epsg != self.elevation.epsg:
+                        print("WARNING: Shielding raster projection (epsg) not matching DEM")
+                    if self.shielding.res != self.elevation.res:
+                        print("WARNING: Shielding raster resolution not matching DEM")
+                    if (self.shielding.min is None or self.shielding.min <0 or
+                        self.shielding.max is None or self.shielding.max >1):
+                        print("WARNING: Shielding raster data outside of valid range (0..1)")
+                    
             elif dtype=='quartz':
                 self.quartz = Raster(fname, dtype)
+                if not self.elevation is None:
+                    if self.quartz.epsg != self.elevation.epsg:
+                        print("WARNING: Quartz raster projection (epsg) not matching DEM")
+                    if self.quartz.res != self.elevation.res:
+                        print("WARNING: Quartz raster resolution not matching DEM")
+                    if (self.quartz.min is None or self.quartz.min <0 or
+                        self.quartz.max is None or self.quartz.max >1):
+                        print("WARNING: Quartz raster data outside of valid range (0..1)")
             else:
                 Raster(fname, dtype) # raises exceptions
         except FileNotFoundError as e:
@@ -437,7 +469,6 @@ class Riversand():
         self.epsg = None
         self.res = None
         
-        
     def add_catchments(self, fname:str):
         """ Add catchment shapefile to the project. """
         
@@ -460,7 +491,12 @@ class Riversand():
                 print("cannot be converted no EPSG code.")
             print("")
             print(e.args[0][1].__repr__())
-            
+        
+        else: #only if catchment was added (no Error)
+            if not self.elevation is None:
+                if self.catchments.crs.to_epsg() != self.elevation.epsg:
+                    print("WARNING: Catchment projection (epsg) not matching DEM")
+                
         self.crs = None
         self.epsg = None
         self.res = None
@@ -565,6 +601,10 @@ class Riversand():
         if df.empty:
             raise ValueError("Failing to read file / no sample data in file")
         
+        #strip leading/trailing spaces from all strings
+        df_obj = df.select_dtypes('object')
+        df[df_obj.columns] = df_obj.apply(lambda x: x.str.strip())
+        
         # sorting as in Params.all_keys w/o topographic and other info at end 
         topo_keys = ['lat', 'latitude', 'lon', 'long', 'longitude', 'elev', 'elevation']
         mandatory_keys = [k for k in Params.all_keys if k not in topo_keys]
@@ -590,7 +630,7 @@ class Riversand():
             print("Using default values for missing columns:\n   {}".format(', '.join(set_default)))
             
         self.valid_catchments = None # set by self.validate()
-        
+
         _, errS, _ = self.validate(verbose=False)
         if errS:
             raise ValueError(errS[0]) # e.g. 'Invalid / missing data in line(s): 6, 7'
@@ -611,7 +651,11 @@ class Riversand():
     
         if data.empty:
             raise ValueError("No sample data in DataFrame")
-    
+        
+        #strip leading/trailing spaces from all strings
+        df_obj = data.select_dtypes('object')
+        data[df_obj.columns] = df_obj.apply(lambda x: x.str.strip())
+        
         # sorting as in Params.all_keys w/o topographic and other info at end 
         topo_keys = ['lat', 'latitude', 'lon', 'long', 'longitude', 'elev', 'elevation']
         mandatory_keys = [k for k in Params.all_keys if k not in topo_keys]
@@ -636,7 +680,7 @@ class Riversand():
             print("Using default values for missing columns:\n   {}".format(', '.join(set_default)))
         
         self.valid_catchments = None # set by self.validate()
-            
+        
         _, errS, _ = self.validate(verbose=False)
         if errS:
             raise ValueError(errS[0]) # e.g. 'Invalid / missing data in line(s): 6, 7'
@@ -733,7 +777,7 @@ class Riversand():
     def validate(self, multi:bool=None, verbose=True):
         """ Validate Riversand object and print error report. """
         
-        from riversand.utils import validate_topo, validate_nuclide, validate_sample
+        from riversand.utils import validate_nuclide, validate_sample
         from riversand.utils import feature_in_raster
 
         class ValidationError(Exception):
@@ -755,10 +799,21 @@ class Riversand():
                 proj_errs += int(self.shielding.epsg!=self.elevation.epsg)
                 proj_errs += int(self.shielding.res!=self.elevation.res)
                 #print("checking shielding "+str(proj_errs))
+                #if (self.shielding.min is None or self.shielding.min <0 or
+                #    self.shielding.max is None or self.shielding.max >1):
+                #    raise ValidationError("Shielding raster data outside of valid range (0..1)")
+                    
+            #if self.snow is not None:
+            #    proj_errs += int(self.snow.epsg!=self.elevation.epsg)
+            #    proj_errs += int(self.snow.res!=self.elevation.res)
+            #    #print("checking quartz "+str(proj_errs))
             if self.quartz is not None:
                 proj_errs += int(self.quartz.epsg!=self.elevation.epsg)
                 proj_errs += int(self.quartz.res!=self.elevation.res)
                 #print("checking quartz "+str(proj_errs))
+                #if (self.quartz.min is None or self.quartz.min <0 or
+                #    self.quartz.max is None or self.quartz.max >1):
+                #    raise ValidationError("Quartz raster data outside of valid range (0..1)")
             if proj_errs>0:
                 raise ValidationError("Conflicting projections in raster data")
             
@@ -817,8 +872,8 @@ class Riversand():
                 or self.catchments is None):
                 raise ValidationError("No catchment data defined")
             
-            if not outR==[]: # outR=None if not validated; outR=["err mssg"] if invalid 
-                raise ValidationError("No valid raster data, cannot validate shapefile projection")
+            if not outR==[]: # outR=[err mssg] if invalid or undefined ["No elevation raster defined"]
+                raise ValidationError("Raster data undefined or invalid, cannot validate shapefile projection")
         
             C_epsg = self.catchments.crs.to_epsg()
             if C_epsg!=self.epsg:
@@ -955,7 +1010,8 @@ class Riversand():
         unit : str, optional
             Unit for plotting. The default is 'mm/yr'.
         plot : str, optional
-            Flag for saving plots, 'jpg' or 'png'. The default is None.
+            Extension for saving plots, e.g. 'jpg', 'png', 'svg', 'eps'.
+            The default is None.
 
         Returns
         -------
@@ -974,9 +1030,9 @@ class Riversand():
         if url is None: url = Params.url
             
         #from riversand.utils import validate_topo, validate_nuclide, validate_sample
-        from riversand.utils import eliminate_quartzfree, get_topostats
+        from riversand.utils import get_topostats
         from riversand.calc import get_textline, get_E, guess_erates
-        from riversand.calc import poly_E_results, get_RMSE
+        from riversand.calc import poly_E_results
         import riversand.plot
         
         if scaling not in Params._scalingmethods:
@@ -1003,12 +1059,30 @@ class Riversand():
         if (shielding=='sample') and ('shielding' not in self.samples.keys()):
             raise ValueError("Invalid shielding='sample' but no shielding in sample data")
             
+        if isinstance(plot, str):
+            if plot[0]=='.': plot = plot[1:]
+            if str.lower(plot) not in ('eps', 'jpeg', 'jpg', 'pdf', 'pgf', 'png',
+                            'ps', 'raw', 'rgba', 'svg', 'svgz', 'tif', 'tiff', 'webp'):
+                plot = None
+        else:
+            plot = None
+        
+        if not plot is None:
+            try:
+                os.makedirs(Params.out_path)
+            except FileExistsError:
+                pass
+            except PermissionError:
+                print("No permission to make directory for saving plots")
+                plot = None
+            
+            
         if unit not in Params.units.keys():
-            raise ValueError("Invalid unit='{}': see Params.units for valid options"
+            raise ValueError("Invalid unit='{}': see riversand.print_units()"
                              .format(unit))
             
             
-        result_cols = ['name', 'scaling', 'nuclide', 'qtz',
+        result_cols = ['name', 'scaling', 'nuclide',
                        'E', 'delE-', 'delE+', 'NRMSE', 'Tavg', 'error']
         results = pd.DataFrame(columns=result_cols)
         
@@ -1031,144 +1105,173 @@ class Riversand():
                 print("Topographic shielding : {}".format(shielding))
             if not self.quartz is None:
                 print("Correcting for quartz-free lithologies")
-            if plot=='png':
-                print("Saving plots as .png in '.{}{}'".format(os.sep, Params.out_path))
-            if plot in ('jpg', 'auto'):
-                print("Saving plots as .jpg in '.{}{}'".format(os.sep, Params.out_path))
+            if plot is None:
+                print("Not saving plots")
+            else:
+                print("Saving plots as .{} in '{}'".format(plot, Params.out_path))
             print("")
 
-        Qpc = 0 # quartz-free lithology removed; default value
         try:
-            clips = self.clip_all_rasters() # function calls self.validate()
-        except ValueError as e:
-            # catchment is out of bounds; this shold never happen for
-            # single-catchment datasets
+            clips = self.clip_all_rasters() # function does not call self.validate()
+        except OutOfBoundsError:
+            #    "clip_all_rasters() : catchment polygon out of bounds"
             print("Catchment is out of bounds")
+            return results
+        except ValueError as e:
+            #"non-matching projection (epsg) of raster datasets"
+            #"shapefile projection (epsg) not matching raster datasets"
+            #"{} raster outside of valid range (0..1)".format(r)
+            err_code = e.args[0]
+            print("ERROR: {}\n".format(err_code[:1].upper() + err_code[1:]))
+            # the first two of these should never happen
+        except RuntimeError:
+            #RuntimeError #can only happen if argument n in clip_all_rasters()
+            #    "clip_all_rasters() : .catchments does not have n={} polygons".format(n)
+            print("Indexing error; this should never happen")
             return results
             
         else:
-            if 'quartz' in clips.keys():
-                #clips = eliminate_quartzfree(clips) # prints report message
-                clips, Qpc = eliminate_quartzfree(clips, verbose=False, Qpc=True)
-                
-            if plot is not None:
+                           
+            if not plot is None:
                 for label in clips.keys():
                     if label in Raster.dtypes:
-                        riversand.plot.plot_clipped_raster(clips, c_name='',
-                                                 dtype=label, fname=plot)
+                        fig, ax = riversand.plot.plot_clipped_raster(
+                            clips, dtype=label)
+                        if not fig is None:
+                            try:
+                                fig.savefig(os.path.join(Params.out_path, label +'.'+ plot))
+                            except PermissionError:
+                                print("No permission to save plot")
+                                plot = None
                         
             topostats, summary = get_topostats(clips, bins=bins, centroid='from_clipped') # accepts iterable as bins
             
-            try: # mock textline to make sure that 'shielding' is set correctly
-                summary['elevation'] = 100
-                _ = get_textline(self.samples.iloc[0],
-                                 summary,
-                                 shielding=shielding)
-            except ValueError as e: # raised by get_textline() for invalid shielding
-                print(type(e).__name__, ":", e.args[0])
+            if len(topostats)==0:
+                err = ['no quartz in catchment']
+                print("No quartz in catchment")
                 return results
                 
-            self.restandardize(verbose=False)
-            # modifies self.samples to restandardized values
-            # in either case poly_E_results() uses restandardized values for calculation but does not touch self.samples
+            else:
             
-            for idx, sample_data in self.samples.iterrows(): # sample_data as pd.Series
-                
-                E = np.nan
-                delE = (np.nan, np.nan)
-                NRMSE = np.nan
-            
-                # sample name from input or default value
-                try:
-                    name = sample_data['name']
-                except:
-                    name = Params.default_values['name']
-                
-                # nuclide and mineral from input or default value
-                try:
-                    nuclide = sample_data['nuclide']+' '
-                except:
-                    nuclide = Params.default_values['nuclide']+' '
-                try:
-                    nuclide += sample_data['mineral']
-                except:
-                    nuclide += Params.default_values['mineral']
-                                    
-                try:
-                    # estimate minimum and maximum erosion rates
-                    summary['elevation'] = summary['elevLo']
-                    textline = get_textline(sample_data, summary, shielding=shielding)
-                    E_Lo = get_E(textline) # erosion rates in cm/yr
-                        
-                    summary['elevation'] = summary['elevHi']
-                    textline = get_textline(sample_data, summary, shielding=shielding)
-                    E_Hi = get_E(textline) # erosion rates in cm/yr
+                try: # mock textline to make sure that 'shielding' is set correctly
+                    summary['elevation'] = 100
+                    _ = get_textline(self.samples.iloc[0],
+                                     summary,
+                                     shielding=shielding)
                 except ValueError as e: # raised by get_textline() for invalid shielding
-                    err = [e.args[0]]
-                except RuntimeError as e: # raised by get_E()
-                    err = [e.args[0][10:]]
+                    print(type(e).__name__, ":", e.args[0])
+                    return results
                     
-                else:
+                self.restandardize(verbose=False)
+                # modifies self.samples to restandardized values
+                # in either case poly_E_results() uses restandardized values for calculation but does not touch self.samples
                 
-                    # generate suitable erates
-                    erates = guess_erates(E_Lo, E_Hi, scaling=scaling) # cm/yr
+                for idx, sample_data in self.samples.iterrows(): # sample_data as pd.Series
                     
-                    E, delE, NofE, err = (
-                        poly_E_results(sample_data, topostats, 
-                        shielding=shielding, erates=erates, scaling=scaling, url=url))
+                    E = np.nan
+                    delE = (np.nan, np.nan)
+                    NRMSE = np.nan
+                
+                    # sample name from input or default value
+                    try:
+                        name = str(sample_data['name'])
+                    except:
+                        name = Params.default_values['name']
                     
-                    # catch out-of-bound errors
-                    while 'minE too high' in err:
-                        erates = guess_erates(3*erates[0]-2*erates[1], erates[-1]) # cm/yr
-                        E, delE, NofE, err = (
+                    # nuclide and mineral from input or default value
+                    try:
+                        nuclide = sample_data['nuclide']+' '
+                    except:
+                        nuclide = Params.default_values['nuclide']+' '
+                    try:
+                        nuclide += sample_data['mineral']
+                    except:
+                        nuclide += Params.default_values['mineral']
+                                        
+                    try:
+                        # estimate minimum and maximum erosion rates
+                        summary['elevation'] = summary['elevLo']
+                        textline = get_textline(sample_data, summary, shielding=shielding)
+                        E_Lo = get_E(textline) # erosion rates in cm/yr
+                            
+                        summary['elevation'] = summary['elevHi']
+                        textline = get_textline(sample_data, summary, shielding=shielding)
+                        E_Hi = get_E(textline) # erosion rates in cm/yr
+                    except ValueError as e: # raised by get_textline() for invalid shielding
+                        err = [e.args[0]]
+                    except RuntimeError as e: # raised by get_E()
+                        err = [e.args[0][10:]]
+                        
+                    else:
+                    
+                        # generate suitable erates
+                        erates = guess_erates(E_Lo, E_Hi, scaling=scaling) # cm/yr
+                        
+                        E, delE, NofE, RMSE, err = (
                             poly_E_results(sample_data, topostats, 
                             shielding=shielding, erates=erates, scaling=scaling, url=url))
                         
-                    while 'maxE too low' in err:
-                        erates = guess_erates(erates[0], 3*erates[-1]-2*erates[-2]) # cm/yr
-                        E, delE, NofE, err = (
-                            poly_E_results(sample_data, topostats, 
-                            shielding=shielding, erates=erates, scaling=scaling, url=url))
+                        # catch out-of-bound errors
+                        while 'minE too high' in err:
+                            erates = guess_erates(3*erates[0]-2*erates[1], erates[-1]) # cm/yr
+                            E, delE, NofE, RMSE, err = (
+                                poly_E_results(sample_data, topostats, 
+                                shielding=shielding, erates=erates, scaling=scaling, url=url))
+                            
+                        while 'maxE too low' in err:
+                            erates = guess_erates(erates[0], 3*erates[-1]-2*erates[-2]) # cm/yr
+                            E, delE, NofE, RMSE, err = (
+                                poly_E_results(sample_data, topostats, 
+                                shielding=shielding, erates=erates, scaling=scaling, url=url))
+                        
+                        NRMSE = RMSE/sample_data['N']
+                        
+                        if not plot is None:
+                            if 'linear fit' in err:
+                                fig, ax = riversand.plot.plot_polyfit(
+                                    E, delE, NofE, sample_data, unit=unit,
+                                    linfit=True)
+                            else:
+                                fig, ax = riversand.plot.plot_polyfit(
+                                    E, delE, NofE, sample_data, unit=unit)
+                            if not fig is None:
+                                try:
+                                    fig.savefig(os.path.join(
+                                        Params.out_path,
+                                        str(idx)+'_'+name+'_'+scaling+'.'+plot))
+                                except PermissionError:
+                                    print("No permission to save plot")
+                                    #plot = None
+                            
+                            
                     
-                    NRMSE = get_RMSE(NofE)/sample_data['N']
-                    
-                    if plot is not None:
-                        if plot in {'jpg', 'png'}:
-                            fullname = "{}_{}_{}.{}".format(idx, name, scaling, plot)
+                    finally:
+                        results.loc[idx, 'name'] = name    
+                        results.loc[idx, 'scaling'] = scaling
+                        results.loc[idx, 'nuclide'] = nuclide
+                        
+                        results.loc[idx, 'E'] = E
+                        results.loc[idx, 'delE-'] = delE[0]
+                        results.loc[idx, 'delE+'] = delE[1]
+                        results.loc[idx, 'NRMSE'] = NRMSE
+                        
+                        if np.isnan(E):
+                            results.loc[idx, 'Tavg'] = E
                         else:
-                            fullname = "{}_{}_{}.jpg".format(idx, name, scaling)
-                        riversand.plot.plot_polyfit(E, delE, NofE, sample_data,
-                                                    unit=unit, fname=plot,
-                                                    fullname=fullname)
-                    
-                finally:
-                    results.loc[idx, 'name'] = name    
-                    results.loc[idx, 'scaling'] = scaling
-                    results.loc[idx, 'nuclide'] = nuclide
-                    results.loc[idx, 'qtz'] = np.round(100-Qpc,1)
-                    
-                    results.loc[idx, 'E'] = E
-                    results.loc[idx, 'delE-'] = delE[0]
-                    results.loc[idx, 'delE+'] = delE[1]
-                    results.loc[idx, 'NRMSE'] = NRMSE
-                    
-                    if np.isnan(E):
-                        results.loc[idx, 'Tavg'] = E
-                    else:
-                        Tavg = 160/sample_data['density']/E
-                        #f = int(np.log10(Tavg))-2
-                        #Tavg = np.round(Tavg/10**f,)*10**f
-                        results.loc[idx, 'Tavg'] = int(Tavg)
-                    
-                    if err==[]:
-                        results.loc[idx, 'error'] = ''
-                    else:
-                        results.loc[idx, 'error'] = "; ".join(err)
-                    ## possible error messages:
-                    # 'NRMSE = ...'
-                    # 'Root finding did not converge'
-                    # 'Cannot compute uncertainty'
-                    # 'Server cannot resolve erosion rates, dropping duplicates'
+                            Tavg = 160/sample_data['density']/E
+                            #f = int(np.log10(Tavg))-2
+                            #Tavg = np.round(Tavg/10**f,)*10**f
+                            results.loc[idx, 'Tavg'] = int(Tavg)
+                        
+                        if err==[]:
+                            results.loc[idx, 'error'] = ''
+                        else:
+                            results.loc[idx, 'error'] = "; ".join(err)
+                        ## possible error messages:
+                        # 'NRMSE = ...'
+                        # 'Root finding did not converge'
+                        # 'Cannot compute uncertainty'
+                        # 'Server cannot resolve erosion rates, dropping duplicates'
         
         if verbose:
             print("Processing finished.")
@@ -1187,7 +1290,7 @@ class Riversand():
         Parameters
         ----------
         bins : float, optional
-            Bin size in meters for elevation binning. The default is 500.
+            Bin size in metres for elevation binning. The default is 500.
         scaling : str, optional
             Scaling method 'St', 'Lm' or 'LSDn'. The default is 'LSDn'.
         shielding : str or numeric, optional
@@ -1196,8 +1299,9 @@ class Riversand():
         unit : str, optional
             Unit for plotting. The default is 'mm/yr'.
         plot : str, optional
-            Flag for saving plots, 'jpg' or 'png'. The default is None.
-    
+            Extension for saving plots, e.g. 'jpg', 'png', 'svg', 'eps'.
+            The default is None.
+            
         Returns
         -------
         results : pd.DataFrame
@@ -1214,9 +1318,9 @@ class Riversand():
         if url is None: url = Params.url
             
         #from riversand.utils import validate_topo, validate_nuclide, validate_sample
-        from riversand.utils import eliminate_quartzfree, get_topostats
+        from riversand.utils import get_topostats
         from riversand.calc import get_textline, get_E, guess_erates
-        from riversand.calc import poly_E_results, get_RMSE
+        from riversand.calc import poly_E_results
         import riversand.plot
         
         if scaling not in Params._scalingmethods:
@@ -1239,13 +1343,46 @@ class Riversand():
             raise ValueError("Invalid shielding='topo' but no shielding raster available")
         if (shielding=='sample') and ('shielding' not in self.samples.keys()):
             raise ValueError("Invalid shielding='sample' but no shielding in sample data")
-            
+
+        if isinstance(plot, str):
+            if plot[0]=='.': plot = plot[1:]
+            if str.lower(plot) not in ('eps', 'jpeg', 'jpg', 'pdf', 'pgf', 'png',
+                            'ps', 'raw', 'rgba', 'svg', 'svgz', 'tif', 'tiff', 'webp'):
+                plot = None
+        else:
+            plot = None
+        
+        if not plot is None:
+            try:
+                os.makedirs(Params.out_path)
+            except FileExistsError:
+                pass
+            except PermissionError:
+                print("No permission to make directory for saving plots")
+                plot = None    
+       
+        if not plot is None:
+            for k,v in {'elevation': self.elevation,
+                        'shielding': self.shielding,
+                        'quartz': self.quartz 
+                       }.items():
+                if not v is None:
+                    try:
+                        os.makedirs(os.path.join(Params.out_path, k))
+                    except FileExistsError:
+                        pass
+                    except PermissionError:
+                        print("No permission to make subdirectory for saving plots")
+                        plot = None
+
+                
+
         if unit not in Params.units.keys():
-            raise ValueError("Invalid unit='{}': see Params.units for valid options"
+            raise ValueError("Invalid unit='{}': see riversand.print_units()"
                              .format(unit))
             
             
-        result_cols = ['name', 'scaling', 'nuclide', 'qtz',
+        result_cols = ['name', 'scaling', 'nuclide',
                        'E', 'delE-', 'delE+', 'NRMSE', 'Tavg', 'error']
         results = pd.DataFrame(columns=result_cols)
         results['name'] = self.samples['name']
@@ -1269,20 +1406,20 @@ class Riversand():
                 print("Topographic shielding : {}".format(shielding))
             if not self.quartz is None:
                 print("Correcting for quartz-free lithologies")
-            if plot=='png':
-                print("Saving plots as .png in '.{}{}'".format(os.sep, Params.out_path))
-            if plot in ('jpg', 'auto'):
-                print("Saving plots as .jpg in '.{}{}'".format(os.sep, Params.out_path))
+            if plot is None:
+                print("Not saving plots")
+            else:
+                print("Saving plots as .{} in '{}'".format(plot, Params.out_path))
             print("")
             print("")
 
         # some printout formatting
         If = len(str(len(self.samples))) # fill length for id
         Nf = max([len(l) for l in self.samples['name'].values]) # fill length for sample name
-        Ef = 26 # fill length for erosion rate result        
+        #Ef = 26 # fill length for erosion rate result        
         order_str = "{: >"+str(If)+"} {: <"+str(Nf)+"} : "
         #order_str_E2 = "{: >"+str(If)+"} {: <"+str(Nf)+"} : {: >"+str(Ef)+"}"  # erosion rate result
-        order_str_F1 = "{: >"+str(If)+"} {: <"+str(Nf)+"} : "  # erosion rate result
+        #order_str_F1 = "{: >"+str(If)+"} {: <"+str(Nf)+"} : "  # erosion rate result
         #order_str_F2 = "{: >"+str(If)+"} {: <"+str(Nf)+"} : {}"  # erosion rate result
 
         self.restandardize(verbose=False)
@@ -1291,13 +1428,12 @@ class Riversand():
         
         for idx, sample_data in self.samples.iterrows(): # iterate over all samples
         
-            Qpc = 0 # quartz-free lithology removed; default value
             E = np.nan
             delE = (np.nan, np.nan)
             NRMSE = np.nan
             error_code = None
 
-            name = sample_data['name']
+            name = str(sample_data['name'])
             # nuclide and mineral from input or default value
             try:
                 nuclide = sample_data['nuclide']+' '
@@ -1311,92 +1447,123 @@ class Riversand():
             if verbose: # print index and sample name
                 print(order_str.format(idx, name), end='')
             
+            
             if sample_data['name'] not in self.valid_catchments: #set by self.validate()
                 error_code = 'no catchment polygon'
             else:
                 # get integer id of the catchment
                 n = [n for n, c in enumerate(self.catchments.catchments) 
-                     if c['properties'][self.cid]==name][0]
-                try:
-                    clips = self.clip_all_rasters(n) # function calls rv.validate()
-                except ValueError as e:
-                    #print(e) # out of bounds ; is checked by .validate() and should not happen for single-catchment 
-                    error_code = 'catchment out of bounds'
-                else:
-                    if 'quartz' in clips.keys():
-                        clips, Qpc = eliminate_quartzfree(clips, verbose=False, Qpc=True)
+                     if str(c['properties'][self.cid])==name][0]
                 
+                try:
+                    clips = self.clip_all_rasters(n) # function does not call rv.validate()
+                    
+                except OutOfBoundsError:
+                    #    "clip_all_rasters() : catchment polygon out of bounds"
+                    error_code = 'catchment out of bounds'
+                except ValueError as e:
+                    #"non-matching projection (epsg) of raster datasets"
+                    #"shapefile projection (epsg) not matching raster datasets"
+                    #"{} raster outside of valid range (0..1)".format(r)
+                    error_code = e.args[0]
+                    # the first two of these should never happen                    
+                except RuntimeError:
+                    #RuntimeError
+                    #    "clip_all_rasters() : .catchments does not have n={} polygons".format(n)
+                    error_code = 'indexing error; use process_single_catchment()' # this should not happen
+                    
+                else:
+                    
                     if plot is not None:
                         for label in clips.keys():
                             if label in Raster.dtypes:
-                                riversand.plot.plot_clipped_raster(
-                                    clips, c_name=name,
-                                    dtype=label, fname=plot)
-                                
+                                fig, ax = riversand.plot.plot_clipped_raster(
+                                    clips, dtype=label)
+                                if not fig is None:
+                                    try:
+                                        fig.savefig(os.path.join(
+                                            Params.out_path,
+                                            label, #subfolder
+                                            str(sample_data.name)+'_'+name+'.'+plot))
+                                    except PermissionError:
+                                        print("No permission to save plot")
+                                        #plot = None
+
                     topostats, summary = get_topostats(clips, bins=bins, centroid='from_clipped') # accepts iterable as bins
                     
-                    
-                    try:
-                        # estimate minimum and maximum erosion rates
-                        summary['elevation'] = summary['elevLo']
-                        textline = get_textline(sample_data, summary, shielding=shielding)
-                        E_Lo = get_E(textline) # erosion rates in cm/yr
+                    if len(topostats)==0:
+                        err = ['no quartz in catchment']
+                        print("no quartz in catchment")
                         
-                        summary['elevation'] = summary['elevHi']
-                        textline = get_textline(sample_data, summary, shielding=shielding)
-                        E_Hi = get_E(textline) # erosion rates in cm/yr
-                    except ValueError as e: # raised by get_textline() for invalid shielding
-                        print(type(e).__name__, ":", e.args[0])
-                        err = [e.args[0]]
-                    
-                    except RuntimeError as e: # raised by get_E()
-                        error_code = e.args[0][10:] # e.g. "get_E() : sample appears to be saturated"
                     else:
-            
-                        # generate suitable erates
-                        erates = guess_erates(E_Lo, E_Hi, scaling=scaling) # cm/yr
-                        E, delE, NofE, err = (
-                            poly_E_results(sample_data, topostats, 
-                            shielding=shielding, erates=erates, scaling=scaling, url=url))
+                        try:
+                            # estimate minimum and maximum erosion rates
+                            summary['elevation'] = summary['elevLo']
+                            textline = get_textline(sample_data, summary, shielding=shielding)
+                            E_Lo = get_E(textline) # erosion rates in cm/yr
+                            
+                            summary['elevation'] = summary['elevHi']
+                            textline = get_textline(sample_data, summary, shielding=shielding)
+                            E_Hi = get_E(textline) # erosion rates in cm/yr
+                        except ValueError as e: # raised by get_textline() for invalid shielding
+                            print(type(e).__name__, ":", e.args[0])
+                            err = [e.args[0]]
+                        
+                        except RuntimeError as e: # raised by get_E()
+                            error_code = e.args[0][10:] # e.g. "get_E() : sample appears to be saturated"
+                        else:
                 
-                        # catch out-of-bound errors
-                        while 'minE too high' in err:
-                            erates = guess_erates(3*erates[0]-2*erates[1], erates[-1]) # cm/yr
-                            E, delE, NofE, err = (
+                            # generate suitable erates
+                            erates = guess_erates(E_Lo, E_Hi, scaling=scaling) # cm/yr
+                            E, delE, NofE, RMSE, err = (
                                 poly_E_results(sample_data, topostats, 
                                 shielding=shielding, erates=erates, scaling=scaling, url=url))
+                    
+                            # catch out-of-bound errors
+                            while 'minE too high' in err:
+                                erates = guess_erates(3*erates[0]-2*erates[1], erates[-1]) # cm/yr
+                                E, delE, NofE, RMSE, err = (
+                                    poly_E_results(sample_data, topostats, 
+                                    shielding=shielding, erates=erates, scaling=scaling, url=url))
+                                
+                            while 'maxE too low' in err:
+                                erates = guess_erates(erates[0], 3*erates[-1]-2*erates[-2]) # cm/yr
+                                E, delE, NofE, RMSE, err = (
+                                    poly_E_results(sample_data, topostats, 
+                                    shielding=shielding, erates=erates, scaling=scaling, url=url))
                             
-                        while 'maxE too low' in err:
-                            erates = guess_erates(erates[0], 3*erates[-1]-2*erates[-2]) # cm/yr
-                            E, delE, NofE, err = (
-                                poly_E_results(sample_data, topostats, 
-                                shielding=shielding, erates=erates, scaling=scaling, url=url))
-                        
-                        NRMSE = get_RMSE(NofE)/sample_data['N']
-
-                        # printout formatting
-                        Estr = "{:.1f}+/-{:.1f} {}".format(E*Params.units[unit],
-                                                        delE[1]*Params.units[unit],
-                                                        unit)
-                        
-                        if plot is not None:
-                            if plot in {'jpg', 'png'}:
-                                fullname = "{}_{}_{}.{}".format(idx, name, scaling, plot)
-                            else:
-                                fullname = "{}_{}_{}.jpg".format(idx, name, scaling)
-                            riversand.plot.plot_polyfit(E, delE, NofE, sample_data,
-                                                        unit=unit, fname=plot,
-                                                        fullname=fullname)
+                            NRMSE = RMSE/sample_data['N']
+    
+                            # printout formatting
+                            Estr = "{:.1f}+/-{:.1f} {}".format(E*Params.units[unit],
+                                                            delE[1]*Params.units[unit],
+                                                            unit)
                             
-                        if verbose: # print erosion rate result
-                            print(Estr)
+                            if not plot is None:
+                                if 'linear fit' in err:
+                                    fig, ax = riversand.plot.plot_polyfit(
+                                        E, delE, NofE, sample_data, unit=unit,
+                                        linfit=True)
+                                else:
+                                    fig, ax = riversand.plot.plot_polyfit(
+                                        E, delE, NofE, sample_data, unit=unit)
+                                if not fig is None:
+                                    try:
+                                        fig.savefig(os.path.join(
+                                            Params.out_path,
+                                            str(sample_data.name)+'_'+name+'_'+scaling+'.'+plot))
+                                    except PermissionError:
+                                        print("No permission to save plot")
+                                        #plot = None
+                                        
+                            if verbose: # print erosion rate result
+                                print(Estr)
                             
                        
                         
             results.loc[idx, 'name'] = sample_data['name']   
             results.loc[idx, 'scaling'] = scaling
             results.loc[idx, 'nuclide'] = nuclide
-            results.loc[idx, 'qtz'] = np.round(100-Qpc,1)
                         
             results.loc[idx, 'E'] = E
             results.loc[idx, 'delE-'] = delE[0]
@@ -1430,6 +1597,7 @@ class Riversand():
                 # 'NRMSE = ...'
                 # 'Root finding did not converge'
                 # 'Cannot compute uncertainty'
+                # 'linear fit'
                 # 'Server cannot resolve erosion rates, dropping duplicates'
         
         #try: # if all went wrong there might not be a variable clips
@@ -1453,10 +1621,10 @@ class Riversand():
             Table of results for each catchment. Keys are:
             - centr_lat, centr_long : centroid coordinates (in WGS84)
             - mean_elev, stdev_elev : mean and standard deviation of catchment elevations
+            - median_elev : median elevation
             - relief : difference betweem highesta and lowest elevation
             - area : catchment area in km2 assuming geotiff resolution in metres!
             - mean_sf : mean shielding factor
-            - qtz_pc : percent area of catchment that contributes quartz
             - error : "catchment out of bounds" if not within bounds of geotiff
             
         Raises
@@ -1466,7 +1634,6 @@ class Riversand():
             
         """
         
-        from riversand.utils import eliminate_quartzfree, get_topostats
         from riversand.utils import projected_xy_to_longlat, get_xarray_centroid
         
         if self.elevation is None:
@@ -1477,7 +1644,8 @@ class Riversand():
             raise ValueError("Missing catchment polygons")
             
         topo_cols = ['name', 'centr_lat', 'centr_long', 'mean_elev', 'stdev_elev',
-                     'relief', 'area', 'mean_sf', 'qtz_pc']
+                     'median_elev', 
+                     'relief', 'area', 'mean_sf']
         results = pd.DataFrame(columns=topo_cols)
             
         errR, errS, errC = self.validate(verbose=False) # 'multi' determined from number of catchments
@@ -1492,7 +1660,7 @@ class Riversand():
             
         for idx, c in enumerate(self.catchments.catchments):
             if self.cid:
-                name = c['properties'][self.cid]
+                name = str(c['properties'][self.cid])
             else:
                 name = ""#c['id']
             results.loc[idx, 'name'] = name
@@ -1501,20 +1669,20 @@ class Riversand():
                 end = ", "
                 
             try:
-                clips = self.clip_all_rasters(idx) # function calls rv.validate()
-            except ValueError as e:
+                clips = self.clip_all_rasters(idx) # function does not call rv.validate()
+            except OutOfBoundsError:
                 results.loc[idx, 'error'] = 'catchment out of bounds'
+            except ValueError:
+                results.loc[idx, 'error'] = 'indexing error; this should never happen' # this should not happen
             else:
                 results.loc[idx, 'error'] = ''
-                if 'quartz' in clips.keys():
-                    clips, Qpc = eliminate_quartzfree(clips, verbose=False, Qpc=True)
-                    results.loc[idx, 'qtz_pc'] = np.round(100-Qpc,1)
-                else:
-                    results.loc[idx, 'qtz_pc'] = 100.
-                (cx, cy) = projected_xy_to_longlat(get_xarray_centroid(
-                                clips['elevation']),
-                                clips['epsg']
-                                )
+                
+                try:
+                    (cx, cy) = get_xarray_centroid(clips['elevation'])
+                except RuntimeError: # raised by get_xarray_centroid() for empty xarray
+                    (cx, cy) = (np.nan, np.nan)
+                    
+                (cx, cy) = projected_xy_to_longlat((cx, cy), clips['epsg'])
                 
                 area_per_pixel = float(
                     np.abs(clips['elevation'].transform[0] * 
@@ -1523,17 +1691,29 @@ class Riversand():
                 
                 results.loc[idx, 'centr_lat'] = np.round(cy, 5)
                 results.loc[idx, 'centr_long'] = np.round(cx, 5)
-                results.loc[idx, 'mean_elev'] = np.round(
-                    float(np.nanmean(clips['elevation'])), 1)
-                results.loc[idx, 'stdev_elev'] = np.round(
-                    float(np.nanstd(clips['elevation'])), 1)
-                results.loc[idx, 'relief'] = np.round(
-                    np.nanmax(clips['elevation'])-np.nanmin(clips['elevation']), 1)
+                
+                if area > 0: # avoid RuntimeWarning e.args[0]=='Mean of empty slice';  
+                    results.loc[idx, 'mean_elev'] = np.round(
+                        float(np.nanmean(clips['elevation'])), 1)
+                    results.loc[idx, 'stdev_elev'] = np.round(
+                        float(np.nanstd(clips['elevation'])), 1)
+                    results.loc[idx, 'median_elev'] = np.round(
+                        float(np.nanmedian(clips['elevation'])), 1)
+                    results.loc[idx, 'relief'] = np.round(
+                        np.nanmax(clips['elevation'])-np.nanmin(clips['elevation']), 1)
+                    if 'shielding' in clips.keys():
+                        results.loc[idx, 'mean_sf'] = np.round(
+                            np.nanmean(clips['shielding']), 5)
+                else:
+                    results.loc[idx, 'mean_elev'] = np.nan
+                    results.loc[idx, 'stdev_elev'] = np.nan
+                    results.loc[idx, 'median_elev'] = np.nan
+                    results.loc[idx, 'relief'] = np.nan
+                    if 'shielding' in clips.keys():
+                        results.loc[idx, 'mean_sf'] = np.nan
+                    
                 results.loc[idx, 'area'] = np.round(area, 1)
                 
-                if 'shielding' in clips.keys():
-                    results.loc[idx, 'mean_sf'] = np.round(
-                        np.nanmean(clips['shielding']), 5)
         
         if verbose:
             print(" finished.")
@@ -1549,8 +1729,8 @@ class Riversand():
         if self.path_to_data is None:
             s += ["Input data folder: not set"]
         else:
-            s += ["Input data folder: '.{}{}'".format(os.sep, self.path_to_data)]
-        s += ["Output folder for plots: '.{}{}'\n".format(os.sep, Params.out_path)]
+            s += ["Input data folder: '{}'".format(self.path_to_data)]
+        s += ["Output folder for plots: '{}'\n".format(Params.out_path)]
         
         if self.elevation or self.shielding or self.quartz:
             s += ["---------------"]
@@ -1576,9 +1756,9 @@ class Riversand():
             s += ["==============="]
             s += ["Validated projection:"]
             if self.epsg:
-                s += ["epsg  : {}".format(self.epsg)]
+                s += ["epsg   : {}".format(self.epsg)]
             if self.res:
-                s += ["res   : {}".format(self.res)]
+                s += ["res    : {}".format(self.res)]
             s += [""]
             
         if self.valid_catchments is None:
@@ -1597,59 +1777,98 @@ class Riversand():
     
 
 
-    def clip_all_rasters(self, n:int=None) -> dict:
+    
+    def clip_all_rasters(self, n:int=0) -> dict:
         """
-        Clip all rasters 'elevation', 'shielding', 'quartz' to a single polygon.
+        Clip all rasters 'elevation', 'shielding', 'quartz' to one polygon.
         
         n : int
             Number of the catchment.
-            > polygon = selg.catchment.catchments[n]['geometry']
+            > polygon = self.catchment.catchments[n]['geometry']
             For single-catchment shapefile set n=0 or or n=None (default value).
         
+        Returns
+        -------
+        clips : dict
+            Keys are 'elevation', 'shielding', 'quartz' with xarrays of the
+            corresponding clipped raster. Additional keys 'epsg', 'name'.
+        
+        Exceptions
+        ----------
+        RuntimeError
+            "polygon indexing error (arg n)"
+        ValueError
+            "non-matching projection (epsg) of raster datasets"
+            "shapefile projection (epsg) not matching raster datasets"
+            "{} values are nodata".format(r))
+            "{} values are outside of valid range (0..1)".format(r)
+        OutOfBoundsError 
+            "catchment polygon out of bounds"
+            
         """
         
+        
         from riversand.utils import clip_raster
-        
-        if n is None:
-            n=0
-        
+                
         #if self.epsg is None:
         #    print("WARNING : dataset does not seem validated, run .validate()")
-        errR, errS, errC = self.validate(verbose=False)
-        if len(errR+errC)>0:
-            raise ValueError("Cannnot validate data; use .validate() for details")
+        #errR, errS, errC = self.validate(verbose=False)
+        #if len(errR+errC)>0:
+        #    raise ValueError("Cannnot validate data; use .validate() for details")
         
         try:
             polygon = self.catchments.catchments[n]['geometry'] # raises IndexError
             #try:
-            #    c_name = self.catchments.catchments[n]['properties'][self.cid]
+            #    c_name = str(self.catchments.catchments[n]['properties'][self.cid])
             #except:
             #    c_name = '' # for Exception message
-        except IndexError as e:
-            raise ValueError("clip_all_rasters() : .catchments does not have "+
-                             "n={} polygons".format(n)
+        except IndexError:
+            raise ValueError("polygon indexing error (arg n)"
                              ) from None
-        
+        try: # catchment name
+            name = str(self.catchments.catchments[n].properties[self.cid])
+        except:
+            name = ''
+            
         clips = {}
         
         rr = [r for r in [self.elevation, self.shielding, self.quartz]
              if r is not None]
         
+        epsgs = set(r.epsg for r in [self.elevation, self.shielding, self.quartz]
+             if r is not None)
+        if len(epsgs)!=1:
+            raise ValueError("non-matching projection (epsg) of raster datasets")
+        if self.catchments.epsg not in epsgs:
+            raise ValueError("shapefile projection (epsg) not matching raster datasets")
+        
         for r in rr:
             label = r.dtype
-            try:    
-                Z = clip_raster(polygon, r.src, label)
-            except ValueError as e:
-                raise ValueError("clip_all_rasters() : catchment polygon out of bounds"
+
+            try:
+                Z = clip_raster(polygon, r.src, label, name)
+            except ValueError:
+                raise OutOfBoundsError("catchment polygon out of bounds"
                                  ) from None
             clips[label] = Z
             
+        for r in {'elevation', 'shielding', 'quartz'}:
+            if r in clips.keys():
+                if (sum(~np.isnan(clips[r].values.flatten()))==0): # all empty slice
+                    raise ValueError("{} values are nodata".format(r))
+            
+        for r in {'shielding', 'quartz'}:
+            if r in clips.keys():            
+                if (np.nanmin(clips[r].values)<0 or np.nanmax(clips[r].values)>1):
+                    raise ValueError("{} values are outside of valid range".format(r))
+        
         # out of bounds is caught by validation of the clipped catchment
         if any(x is None for x in clips.values()):
-            raise ValueError("clip_all_rasters() : catchment polygon out of bounds"
+            raise OutOfBoundsError("catchment polygon out of bounds"
                              ) from None
         
-        clips['epsg'] = self.epsg # validated at the beginning of the function
+        clips['epsg'] = epsgs.pop() # validated above
+        clips['name'] = name # also stored with each clip['elevation].attrs['name']
         return clips
 
 

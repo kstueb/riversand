@@ -165,7 +165,7 @@ def get_textline(sample:pd.Series, topo:pd.Series, shielding) -> str:
     
     #out = restandardize_item(out)
             
-    textline = "{} {:.5f} {:.5f} {:.3f} {} {} {} {:.5f} {:.5f} {} ; {} {} {} {} {} {} ;".format(
+    textline = "{} {:.3e} {:.3e} {:.4e} {} {} {} {:.3e} {:.3e} {} ; {} {} {} {} {} {} ;".format(
         out['name'], out['lat'], out['long'], out['elevation'], out['press_flag'],
         out['thickness'], out['density'], out['shielding'], out['erate'], out['year'],
         out['name'], out['nuclide'], out['mineral'], out['N'], out['delN'], out['standardization'])
@@ -478,7 +478,7 @@ def get_NofE_from_server(
     request_vars = {"mlmfile" : "NofE_input_v3", "text_block" : textline}
     form_data = urllib.parse.urlencode(request_vars).encode('ascii')
     
-    try:        
+    try:
         result = urllib.request.urlopen(url, form_data)
     except urllib.error.URLError:
         diagnostics = "No response from {}".format(url)
@@ -599,10 +599,13 @@ def get_NofE_FullTable(
             # x='St', 'Nx'='NpredSt' etc:
             dfA[x] = dfA['topo'].astype(int).map(topostats['wt']) * dfA[Nx].astype(float)
         
-        dfA['E_cmyr'] = dfA['E_cmyr'].apply(pd.to_numeric)
+        num_cols = ['E_cmyr','NpredSt','NpredLm','NpredLSDn', 'St', 'Lm', 'LSDn']
+        dfA[num_cols] = dfA[num_cols].apply(pd.to_numeric)
+        #dfA['E_cmyr'] = dfA['E_cmyr'].apply(pd.to_numeric)
         dfA.drop(columns=['topo'], inplace=True)
         
     return dfA, diagnostics, version
+
 
 
 def get_NofE(
@@ -620,6 +623,12 @@ def get_NofE(
     and can be converted to other standardizations if necessary (the output of
     this function is independent of nuclide concentration and standardization
     specified in 'sample_data').
+    
+    Note that the index (E_cmyr) may be non-unique.
+    This may possibly happens for low erosion rates where the server returns
+    NofE for fewer unique erosion rates than requested due to rounding errors;
+    It shouldn't happen with the improved string formatting of the textline.
+    It happens if erates has duplicates.    
     
     Parameters
     ----------
@@ -662,6 +671,8 @@ def get_NofE(
         raise TypeError("get_NofE() argument 'sample_data' must be dict, "+
                         "pandas Series or single-row pandas Dataframe")
     
+    if isinstance(erates, Number):
+        erates = [erates]
     # validate sample_data and a line of topodata to avoid Exceptions raised by
     # get_NofE_FullTable() (ValueError "Cannot get valid input...")
     try:
@@ -699,18 +710,20 @@ def get_NofE(
         raise RuntimeError("unexpected error in get_NofE() : empty data table")
     
     # 'sample_name' and 'erosion_rate_cm_yr' are tags returned by the server
-    if dfA.groupby('E_cmyr').count().loc[:,'name'].nunique()==1:
-        # if grouping by erosion rate is done correctly each group should have the exact same number of entries
+    if dfA.groupby('E_cmyr').count().loc[:,'name'].nunique()==len(erates): #1:
+        ### if grouping by erosion rate is done correctly each group should have the exact same number of entries
+        # if grouping by erosion rate is done correctly there should be as many groups as erosion rates
         NofE = dfA.groupby('E_cmyr').sum(numeric_only=True)
         
     else:
         # rounding errors in the erosion rates sent to the server may lead to problems
         temp = dfA['name'].str.split('_', expand=True)
         dfA['temp'] = temp[2]
-        temp = dfA.groupby('temp').sum()
-        tempE = dfA.groupby('temp').mean()
+        temp = dfA.groupby('temp').sum(numeric_only=True)
+        tempE = dfA.groupby('temp').mean(numeric_only=True)
         temp['E_cmyr'] = tempE['E_cmyr']
         NofE = temp.set_index('E_cmyr')
+            
     return NofE
 
 
@@ -789,6 +802,9 @@ def guess_erates(*args, **kwargs) -> np.ndarray:
 def NofE_fitfunc(x, a, b, c):
     return  a/x**2 + b/x + c
 
+def NofE_linfitfunc(x, a, b):
+    return  a*x + b
+
 
 def poly_E_results(
         sample_data:pd.Series,
@@ -824,6 +840,8 @@ def poly_E_results(
         Uncertainty (-delE, +delE).
     NofE : pd.Series
         Keys are defined by 'scaling' and index 'E_cmyr'.
+    RMSE : float
+        Root Mean Squared Error
     error : list of error strings.
         In case of 'minE too high' or 'maxE too low' the list shows only this error.
     
@@ -845,14 +863,18 @@ def poly_E_results(
             raise RuntimeError("poly_E_results() : argument 'erates' should "+
                                "have at least 4 values; use argument "+
                                "'strict=False' to override")
+            # note that polynomial fitting requires at least 4 data points
+            # 
     # return nan and error string in case of error
     y = None
     E_poly = np.nan
     delE = (np.nan, np.nan)
+    RMSE = np.nan
     
     error = []
     
-    erates[:] = np.sort(erates)
+    #erates[:] = np.sort(erates)
+    erates = np.sort(list(set(erates))) # drop duplicates
     
     if isinstance(sample_data, pd.DataFrame):
         raise TypeError("poly_E_results() : 'sample_data' must be dict or pandas Series")
@@ -871,7 +893,7 @@ def poly_E_results(
         raise e
     except RuntimeError as e: # no server response
         raise e
-        
+    
     if not NofE.index.is_unique:
         # rounding errors in the erates sent to the server may result in non-unique indices;
         # drop duplicates
@@ -891,11 +913,33 @@ def poly_E_results(
     elif Nmeas <= y.iloc[-1]:
         error = ['maxE too low']
         #"ERROR: Erosion rate is outside of specified bracket (>{} cm/yr)".format(x[-1]))
+    
+    elif NofE.index.nunique() < 4:
+        popt, pcov = optimize.curve_fit(NofE_linfitfunc, x, y)
+        a,b = popt
+        sol = optimize.root_scalar(NofE_linfitfunc,
+                                   args=(a, b-Nmeas),
+                                   method='toms748', bracket=[x[0], x[-1]])
+        
+        if sol.converged:
+            E_poly = sol.root            
+
+        else:
+            error += ["Root finding did not converge"]
+            #"ERROR: No solution found"
+        delN = float(sample_data['delN'])
+        delE = (np.abs(delN/a), np.abs(delN/a))
+        
+        RMSE = np.sqrt(np.sum((y - NofE_linfitfunc(NofE.index, *popt))**2)/len(NofE))
+        
+        error = ["linear fit"]
         
     else:
         popt, pcov = optimize.curve_fit(NofE_fitfunc, x, y)
         a,b,c = popt
-        sol = optimize.root_scalar(NofE_fitfunc, args=(a, b, c-Nmeas), method='toms748', bracket=[x[0], x[-1]])
+        sol = optimize.root_scalar(NofE_fitfunc,
+                                   args=(a, b, c-Nmeas),
+                                   method='toms748', bracket=[x[0], x[-1]])
             
         if sol.converged:
             E_poly = sol.root            
@@ -916,7 +960,7 @@ def poly_E_results(
             #raise Warning("NRMSE = {:.2e} suggests a poor fit of the polynomial!".format(RMSE / Nmeas))
             #print("NRMSE={:.2e}".format(RMSE/Nmeas))
                          
-    return E_poly, delE, NofE[scaling], error
+    return E_poly, delE, NofE[scaling], RMSE, error
 
 
 

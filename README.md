@@ -1,11 +1,13 @@
 ------------
-**NEW in version 1.2.7** (released 2024-05-15):
+**NEW in version 1.3** (released 2024-06-04):
 ----------------------------------------------
+Updated lithological ('quartz') weighing functions.
+
 Use functions `get_ages_from_server()` and `get_erates_from_server()` to obtain
 point-based exposure ages and erosion rates calculated by the online calculator
 from sample data in your Excel spreadsheet and save the results as spreadsheet.
 
-See updated documentation [`quickstart.ipynb`](https://github.com/kstueb/riversand/blob/main/example_scripts/quickstart_v1.2.7.ipynb)
+See updated documentation [`quickstart.ipynb`](https://github.com/kstueb/riversand/blob/main/example_scripts/quickstart_v1.3.ipynb)
 
 ------------
 
@@ -43,16 +45,15 @@ before using this calculator.
 
 Documentation
 -------------
-- [`quickstart.ipynb`](https://github.com/kstueb/riversand/blob/main/example_scripts/quickstart_v1.2.7.ipynb)
-- [`step_by_step.ipynb`](https://github.com/kstueb/riversand/blob/main/example_scripts/step_by_step_v1.2.7.ipynb)
+- [`quickstart.ipynb`](https://github.com/kstueb/riversand/blob/main/example_scripts/quickstart_v1.3.ipynb)
+- [`step_by_step.ipynb`](https://github.com/kstueb/riversand/blob/main/example_scripts/step_by_step_v1.3.ipynb)
 - [`test_data/`](https://github.com/kstueb/riversand/blob/main/example_scripts/test_data) : geotiffs of a 35m-resolution digital elevation model, a topographic shielding raster generated with [TopoToolbox](https://topotoolbox.wordpress.com/) and a binary raster indicating quartz-bearing and quartz-free lithologies; shapefiles with catchment outlines; a spreadsheet with sample data. 
 
 Installation
 ------------
-Install riversand by running:
+Install latest version of riversand by running:
 ```
-$ pip install riversand
-$ pip install --upgrade riversand
+$ pip install riversand==1.3
 ```
 Requirements
 ------------
