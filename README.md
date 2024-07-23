@@ -53,7 +53,7 @@ Installation
 ------------
 Install latest version of riversand by running:
 ```
-$ pip install riversand==1.3
+$ pip install riversand==1.3.1
 ```
 Requirements
 ------------
