@@ -1,5 +1,5 @@
 ------------
-**NEW in version 1.3** (released 2024-06-04):
+**NEW in version 1.3.1** (released 2024-07-23):
 ----------------------------------------------
 Updated lithological ('quartz') weighing functions.
 
