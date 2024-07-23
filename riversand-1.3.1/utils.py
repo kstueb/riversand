@@ -596,8 +596,9 @@ def get_bins(Z:xr.DataArray, binsize:int=100) -> np.ndarray:
     """
 
     return np.arange(start=np.floor(Z.min()/binsize)*binsize,
-                      step=binsize,
-                      stop=np.ceil(Z.max()/binsize)*binsize + binsize
+                     step=binsize,
+                     stop=np.ceil(Z.max()/binsize)*binsize + binsize,
+                     dtype=int
                      )
 
 
