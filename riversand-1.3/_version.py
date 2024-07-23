@@ -1,4 +1,7 @@
-__version__ = "1.3"
+__version__ = "1.3.1"
+
+# function get_bins()
+# set dtype=int to fix DeprecationWarning __array__
 
 # updated quartz weighing function
 
