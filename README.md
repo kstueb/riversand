@@ -1,6 +1,11 @@
 ------------
-**NEW in version 1.3.1** (released 2024-07-23):
+**NEW in version 1.3.9** (released 2025-06-04):
 ----------------------------------------------
+
+Use funtion `reproject()` to reproject all raster datasets to match the DEM. This
+may fix issues such as to missing projection in the shielding raster or minor
+mismatches in the raster resolutions.
+
 Updated lithological ('quartz') weighing functions.
 
 Use functions `get_ages_from_server()` and `get_erates_from_server()` to obtain
@@ -53,12 +58,13 @@ Installation
 ------------
 Install latest version of riversand by running:
 ```
-$ pip install riversand==1.3.1
+$ pip install riversand==1.3.9
 ```
 Requirements
 ------------
 - numpy, scipy, pandas, xarray
 - rasterio, fiona, pyproj
+- odfpy, openpyxl
 - matplotlib
 
 License
