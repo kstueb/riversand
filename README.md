@@ -1,5 +1,5 @@
 ------------
-**NEW in version 1.3.9** (released 2025-06-04):
+**NEW in version 1.4** (released 2025-06-04):
 ----------------------------------------------
 
 Use funtion `reproject()` to reproject all raster datasets to match the DEM. This
@@ -50,15 +50,15 @@ before using this calculator.
 
 Documentation
 -------------
-- [`quickstart.ipynb`](https://github.com/kstueb/riversand/blob/main/example_scripts/quickstart_v1.3.ipynb)
-- [`step_by_step.ipynb`](https://github.com/kstueb/riversand/blob/main/example_scripts/step_by_step_v1.3.ipynb)
+- [`quickstart.ipynb`](https://github.com/kstueb/riversand/blob/main/example_scripts/quickstart_v1.4.ipynb)
+- [`step_by_step.ipynb`](https://github.com/kstueb/riversand/blob/main/example_scripts/step_by_step_v1.4.ipynb)
 - [`test_data/`](https://github.com/kstueb/riversand/blob/main/example_scripts/test_data) : geotiffs of a 35m-resolution digital elevation model, a topographic shielding raster generated with [TopoToolbox](https://topotoolbox.wordpress.com/) and a binary raster indicating quartz-bearing and quartz-free lithologies; shapefiles with catchment outlines; a spreadsheet with sample data. 
 
 Installation
 ------------
 Install latest version of riversand by running:
 ```
-$ pip install riversand==1.3.9
+$ pip install riversand==1.4
 ```
 Requirements
 ------------
