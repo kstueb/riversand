@@ -12,7 +12,7 @@ Use functions `get_ages_from_server()` and `get_erates_from_server()` to obtain
 point-based exposure ages and erosion rates calculated by the online calculator
 from sample data in your Excel spreadsheet and save the results as spreadsheet.
 
-See updated documentation [`quickstart.ipynb`](https://github.com/kstueb/riversand/blob/main/example_scripts/quickstart_v1.3.ipynb)
+See updated documentation [`quickstart.ipynb`](https://github.com/kstueb/riversand/blob/main/example_scripts/quickstart_v1.4.ipynb)
 
 ------------
 
